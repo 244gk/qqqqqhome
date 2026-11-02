@@ -88,7 +88,8 @@ class Demo:
             raise RuntimeError("uiautomator dump failed")
         found = []
         for node in ET.fromstring(xml).iter("node"):
-            text = node.get("text") or ""
+            # Icon-only buttons (e.g. the launcher settings icon in the clock card) use their content-desc as text.
+            text = node.get("text") or node.get("content-desc") or ""
             m = re.match(r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]", node.get("bounds", ""))
             if text and m:
                 x1, y1, x2, y2 = map(int, m.groups())

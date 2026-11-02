@@ -120,7 +120,7 @@ then `launcher/build-and-install.sh --apk downloaded.apk`.
 
 ### CI (GitHub Actions)
 
-Runs on every push touching `launcher/` or `ci/`; download the artifacts from the run on the repository's Actions page:
+Not run on every push: start it by hand on the Actions page (launcher → Run workflow). Download the artifacts from the run:
 
 | Artifact | Contents |
 |---|---|
@@ -173,8 +173,9 @@ On **Wi-Fi (unmetered networks)**, a background job downloads up to 2 new wallpa
   (internal versionCode = sequence × 10; the last digit is used for rollback releases).
 - **Download**: the "Download latest" badge at the top of this README downloads the latest APK directly (`releases/latest/download/q5home.apk`);
   the "Latest release" badge opens the latest Release page (versioned APK and release notes).
-- **Release**: on every push to `main`, once CI build, tests and the emulator demo pass, a GitHub Release `v1.0.<sequence>` is published automatically with the APK attached;
-  release notes come from the commit message. Only the newest app change on main is released (the weekly wallpaper-feed commit doesn't count).
+- **Release**: pushing does not build anything. To release, open Actions → launcher → Run workflow (on `main`); once the build, tests and
+  the emulator demo pass, a GitHub Release `v1.0.<sequence>` is published with the APK attached. Release notes list the commits since
+  the previous release (wallpaper-feed commits left out).
 - **Updating on the head unit**: Desktop settings ("桌面设置") → Version update ("版本更新") → Download and install ("下载并安装"). After download, the sha256, package name and version are verified, then Android's install confirmation appears.
   The first time, q5home must be allowed to Install unknown apps ("安装未知应用") (the page guides you to system settings); if the head unit doesn't show that switch, run from a computer:
   ```bash

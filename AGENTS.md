@@ -38,7 +38,8 @@ Do not rely on API 28+ behavior in code without a compatibility path (minSdk sta
 - **Do not commit often**: finish a change, pass local tests and lint, then push it as one commit. Batch small
   changes; never push repeatedly to fix CI (reproduce and fix locally first).
 - **Keep GitHub API calls to a minimum**: no polling of CI, releases or APIs; check rarely or wait for
-  notifications. Do not re-run or trigger workflows by hand, and do not increase the `wallpapers.yml` schedule.
+  notifications. Do not re-run or trigger workflows unless the owner asks (releases are started by hand), and do not increase the
+  `wallpapers.yml` schedule.
 
 ## Safety rules (must follow)
 
@@ -117,8 +118,9 @@ Add package names here as they are identified:
   - Tests: `./gradlew :app:testDebugUnitTest` (Robolectric, including screenshot output to `app/build/screenshots`).
   - `fakeapps/` holds the fake ZLINK / original car apps used for CI recordings; never install them on the head unit (same package name as the real ZLINK).
   - In-app updates: `Updates.kt` (GitHub Release check / download / verify / PackageInstaller install), `UpdateJob.kt` (daily check).
-    Version sequence = `version-base` + commit count (`app/build.gradle`); pushing to main publishes a Release automatically
-    (`release` job; only the newest app change on main is released, wallpaper-feed commits don't count).
+    Version sequence = `version-base` + commit count (`app/build.gradle`). **Pushing does not build**: the `launcher` workflow only runs
+    when the owner starts it by hand (Actions → launcher → Run workflow on `main`); it builds, tests, runs the emulator demo and then
+    publishes the Release (notes = commits since the previous release). Only start it yourself when the owner asks.
   - Head unit recon (no adb): `Recon.kt` (read-only collection), `LocalShare.kt` (temporary web page opened by scanning a QR code with
     a phone: the focused report at the top, ready to copy and send, and the full report below it once generated on the recon page;
     path contains a random string, closes after 15 minutes). **Reports are never uploaded and no GitHub token is used**: the owner copies

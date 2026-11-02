@@ -154,13 +154,11 @@ class ScreenshotTest {
         home("w1280dp-h480dp-land-mdpi", "home-update-badge")
     }
 
-    /** Head-unit recon: waits for the background recon to finish; pretends it was already submitted, so the issue-link QR code is shown. */
+    /** Head-unit recon: waits for the background recon to finish. */
     @Test
     fun settingsRecon() {
         RuntimeEnvironment.setQualifiers("w1280dp-h480dp-land-mdpi")
         FakeApps.installCar(context)
-        context.getSharedPreferences("secrets", Context.MODE_PRIVATE).edit()
-            .putString("github_token", "x").putString("recon_issue_url", "https://github.com/${Updates.REPO}/issues/1").commit()
         val intent = Intent(context, SettingsActivity::class.java)
             .putExtra(SettingsActivity.EXTRA_SECTION, SettingsActivity.SECTION_RECON)
         val activity = Robolectric.buildActivity(SettingsActivity::class.java, intent).setup().get()

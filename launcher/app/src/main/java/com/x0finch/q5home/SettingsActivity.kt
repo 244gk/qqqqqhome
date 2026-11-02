@@ -55,12 +55,11 @@ class SettingsActivity : Activity() {
     @Volatile private var report: Recon.Report? = null
     private var reconRunning = false
     private var share: LocalShare? = null
-    private var submitting = false
-    /** Submission progress text (generating report / uploading). */
-    private var submitStage = ""
     /** The most recent focused report (shown at the top of the phone's QR-code web page). */
     @Volatile private var lastMarkdown: String? = null
-    private var submitError: String? = null
+    /** The full report, generated on request; shown below the focused report on the web page. */
+    @Volatile private var lastFull: String? = null
+    private var generatingFull = false
     // GPS & 4G
     private val signal by lazy { SignalCheck(this) }
     private val signalViews = mutableMapOf<String, TextView>()
@@ -80,6 +79,8 @@ class SettingsActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         config = Config(this).also { it.reload() }
+        // Reports are no longer uploaded: forget any GitHub token an older version stored on the head unit.
+        getSharedPreferences("secrets", MODE_PRIVATE).edit().remove("github_token").remove("recon_issue_url").apply()
         Ui.applyTheme(this)
         section = savedInstanceState?.getString(EXTRA_SECTION) ?: intent.getStringExtra(EXTRA_SECTION) ?: SECTION_WALLPAPER
         root = Ui.pageRoot(this)
@@ -698,38 +699,19 @@ class SettingsActivity : Activity() {
             return
         }
 
-        val upload = ReconUpload(this)
-        val status = when {
-            submitting -> submitStage
-            submitError != null -> "失败：$submitError"
-            upload.lastIssueUrl != null -> "已提交：${upload.lastIssueUrl}"
-            upload.hasToken -> "令牌已保存，可以直接提交"
-            else -> "要提交到 GitHub 需要令牌；不提交也行，扫码网页里可以直接复制报告"
-        }
-        val canSubmit = upload.hasToken && !submitting
-        // Scanning the QR code and copying the focused report is the main way to share it, so that card comes first
+        // Scanning the QR code and copying the report is the only way to share it (nothing is uploaded), so that card comes first
         // (and the QR code stays on screen when it appears).
-        card(*listOfNotNull(shareRow(), if (upload.hasToken) row(R.drawable.ui_delete, "清除令牌", "删除车机上保存的 GitHub 令牌",
-            Ui.pill(this, "清除", Ui.PillStyle.DANGER) {
-                upload.clearToken()
-                overlay.snackbar("已清除令牌")
-                render()
-            }) else null).toTypedArray())
-        tilesRow(
-            tile(R.drawable.ui_update, "提交重点报告", sub = status, subLines = 4,
-                action = Ui.pill(this, if (submitting) "进行中…" else "提交", Ui.PillStyle.PRIMARY) { submitReport(full = false) }.apply {
-                    isEnabled = canSubmit
-                    alpha = if (isEnabled) 1f else 0.4f
-                }).first to 1f,
-            tile(R.drawable.ui_info, "提交完整报告", sub = "全部应用、系统属性、调试线索等，比较长；一般不需要",
-                action = Ui.pill(this, "完整报告") { submitReport(full = true) }.apply {
-                    isEnabled = canSubmit
-                    alpha = if (isEnabled) 1f else 0.4f
-                }).first to 1f,
-        )
-        upload.lastIssueUrl?.let { url ->
-            card(qrRow(url, "已提交到 GitHub", url, null), title = "Issue 链接（手机扫码打开）")
+        card(shareRow())
+        val fullStatus = when {
+            generatingFull -> "正在生成（要读所有应用，可能几十秒）…"
+            lastFull != null -> "已生成：扫码网页里「重点报告」下面就是完整报告"
+            else -> "全部应用、系统属性、调试线索等，比较长；一般不需要。生成后在扫码网页里复制"
         }
+        tilesRow(tile(R.drawable.ui_info, "完整报告", sub = fullStatus, subLines = 3,
+            action = Ui.pill(this, if (generatingFull) "生成中…" else if (lastFull != null) "重新生成" else "生成") { generateFull() }.apply {
+                isEnabled = !generatingFull
+                alpha = if (isEnabled) 1f else 0.4f
+            }).first to 1f)
         card(*r.facts.map { (title, value) -> info(title, value) }.toTypedArray(), title = "要点")
 
         val shown = r.candidates.take(12)
@@ -741,8 +723,8 @@ class SettingsActivity : Activity() {
         }
 
         hint("重点报告：只看仓库 config/recon-targets.json 指定的应用、代码和接口（生成时自动下载最新的，改分析方向不用更新应用），" +
-            "只读，不改车机。手机扫码打开的网页最上面就是重点报告，可以直接复制发出去；也可以粘贴令牌提交到 GitHub Issue（${Updates.REPO}）。" +
-            "令牌只授权这个仓库的 Issues，存在车机上的 q5home 里。临时网页只在这一页开着时运行，15 分钟后自动关闭。")
+            "只读，不改车机，也不会上传到任何地方。手机扫码打开的网页最上面就是重点报告，点「复制全部」发出去就行。" +
+            "临时网页只在这一页开着时运行，15 分钟后自动关闭。")
     }
 
     private fun candidateRow(c: Recon.Candidate): View {
@@ -812,22 +794,8 @@ class SettingsActivity : Activity() {
         if (lastMarkdown == null) Thread {
             runCatching { Recon.focused(this, ReconTargets.load()) }.onSuccess { lastMarkdown = it.markdown }
         }.start()
-        share = runCatching {
-            LocalShare(report = { lastMarkdown }, onToken = { token ->
-                ReconUpload(this).saveToken(token)
-                // Already on the server thread: generate the focused report and submit it; the phone page waits for the result.
-                val result = runCatching {
-                    val r = Recon.focused(this, ReconTargets.load())
-                    lastMarkdown = r.markdown
-                    ReconUpload(this).submit(r.title, r.markdown)
-                }
-                runOnUiThread {
-                    submitError = result.exceptionOrNull()?.let { it.message ?: it.toString() }
-                    if (section == SECTION_RECON) render()
-                }
-                result.fold({ "已提交：$it" }, { "令牌已保存，但提交失败：${it.message}" })
-            })
-        }.onFailure { overlay.snackbar("开不了临时网页：${it.message}") }.getOrNull()
+        share = runCatching { LocalShare(report = { lastMarkdown }, full = { lastFull }) }
+            .onFailure { overlay.snackbar("开不了临时网页：${it.message}") }.getOrNull()
         // Close automatically when time is up (the web page side also rejects requests after the timeout).
         val started = share
         root.postDelayed({
@@ -841,24 +809,17 @@ class SettingsActivity : Activity() {
         share = null
     }
 
-    /** Generate the report, then submit: the key report downloads the analysis targets first; the full report reads every APK, which may take tens of seconds on the head unit. */
-    private fun submitReport(full: Boolean) {
-        if (submitting) return
-        submitting = true
-        submitError = null
-        submitStage = if (full) "正在生成完整报告（要读所有应用，可能几十秒）…" else "正在下载分析目标、生成重点报告…"
+    /** The full report reads every APK, which may take tens of seconds on the head unit; it then appears on the QR web page. */
+    private fun generateFull() {
+        if (generatingFull) return
+        generatingFull = true
         render()
         Thread {
-            val result = runCatching {
-                val r = if (full) Recon.collect(this) else Recon.focused(this, ReconTargets.load())
-                lastMarkdown = r.markdown
-                runOnUiThread { submitStage = "正在提交…"; if (section == SECTION_RECON) render() }
-                ReconUpload(this).submit(r.title, r.markdown)
-            }
+            val result = runCatching { Recon.collect(this) }
             runOnUiThread {
-                submitting = false
-                submitError = result.exceptionOrNull()?.let { it.message ?: it.toString() }
-                overlay.snackbar(if (result.isSuccess) "已提交到 GitHub" else "提交失败：$submitError")
+                generatingFull = false
+                result.onSuccess { lastFull = it.markdown }
+                overlay.snackbar(if (result.isSuccess) "完整报告已生成，扫码网页里可以复制" else "生成失败：${result.exceptionOrNull()?.message}")
                 if (section == SECTION_RECON) render()
             }
         }.start()

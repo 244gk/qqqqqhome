@@ -5,7 +5,6 @@ import android.content.pm.ActivityInfo
 import android.content.pm.ApplicationInfo
 import android.content.pm.PackageInfo
 import androidx.test.core.app.ApplicationProvider
-import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -110,54 +109,9 @@ class ReconTest {
     }
 
     @Test
-    fun uploadSplitsLongReportIntoComments() {
-        TestHttpServer { path ->
-            val body = if (path.endsWith("/issues")) """{"number":7,"html_url":"https://github.com/x/y/issues/7"}""" else "{}"
-            201 to body.toByteArray()
-        }.use { server ->
-            val upload = ReconUpload(app, server.base)
-            upload.saveToken("  github_pat_test  ")
-            val md = (1..3000).joinToString("\n") { "- 第 $it 行 com.example.package$it" }
-            val url = upload.submit("车机摸底", md)
-            assertEquals("https://github.com/x/y/issues/7", url)
-            assertEquals(url, upload.lastIssueUrl)
-
-            val reqs = server.requests
-            assertEquals("/repos/${Updates.REPO}/issues", reqs[0].path)
-            assertEquals("POST", reqs[0].method)
-            assertEquals("Bearer github_pat_test", reqs[0].headers["authorization"])
-            val parts = ReconUpload.split(md)
-            assertTrue(parts.size >= 2)
-            assertEquals(parts.size, reqs.size)
-            assertTrue(reqs.drop(1).all { it.path == "/repos/${Updates.REPO}/issues/7/comments" })
-            // Reassembled text matches the original.
-            val joined = JSONObject(reqs[0].body).getString("body") +
-                reqs.drop(1).joinToString("") { JSONObject(it.body).getString("body").substringAfter("\n\n") }
-            assertEquals(md + "\n", joined)
-        }
-    }
-
-    @Test
-    fun uploadExplainsBadToken() {
-        TestHttpServer { 401 to ByteArray(0) }.use { server ->
-            val upload = ReconUpload(app, server.base).apply { saveToken("bad") }
-            val e = runCatching { upload.submit("t", "b") }.exceptionOrNull()
-            assertTrue(e?.message.orEmpty().contains("令牌无效"))
-        }
-    }
-
-    @Test
-    fun splitKeepsEveryPartUnderLimit() {
-        val text = "a".repeat(250) + "\n" + "b".repeat(30) + "\n" + "c"
-        val parts = ReconUpload.split(text, max = 100)
-        assertTrue(parts.all { it.length <= 100 })
-        assertEquals(text + "\n", parts.joinToString(""))
-    }
-
-    @Test
-    fun localShareServesReportAndAcceptsToken() {
-        var received: String? = null
-        val share = LocalShare(report = { "# 报告 <b>" }, onToken = { received = it; "已提交：https://github.com/x/y/issues/1" }, port = 0)
+    fun localShareServesReportsReadOnly() {
+        var full: String? = null
+        val share = LocalShare(report = { "# 报告 <b>" }, full = { full }, port = 0)
         try {
             val base = "http://127.0.0.1:${share.port}"
             fun get(path: String): Pair<Int, String> {
@@ -170,16 +124,19 @@ class ReconTest {
             val (code, page) = get("/${share.secret}/")
             assertEquals(200, code)
             assertTrue("report must be escaped", page.contains("# 报告 &lt;b&gt;"))
+            assertTrue("no token / upload form any more", !page.contains("<form") && !page.contains("令牌"))
             assertEquals("# 报告 <b>", get("/${share.secret}/report.md").second)
-
+            // The full report only appears once it has been generated.
+            assertEquals(404, get("/${share.secret}/full.md").first)
+            full = "# 完整"
+            assertEquals("# 完整", get("/${share.secret}/full.md").second)
+            assertTrue(get("/${share.secret}/").second.contains("完整报告"))
+            // Nothing accepts uploads.
             val c = URL("$base/${share.secret}/token").openConnection() as HttpURLConnection
             c.requestMethod = "POST"
             c.doOutput = true
-            c.outputStream.use { it.write("token=github_pat_a%2Bb%3D".toByteArray()) }
-            assertEquals(200, c.responseCode)
-            val result = c.inputStream.bufferedReader().readText()
-            assertEquals("github_pat_a+b=", received)
-            assertTrue(result.contains("<a href=\"https://github.com/x/y/issues/1\">"))
+            c.outputStream.use { it.write("token=x".toByteArray()) }
+            assertEquals(404, c.responseCode)
         } finally {
             share.close()
         }

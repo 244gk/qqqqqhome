@@ -34,7 +34,7 @@ Do not rely on API 28+ behavior in code without a compatibility path (minSdk sta
 
 ## GitHub usage (must follow; GitHub abuse detection is strict)
 
-- **Do not open Issues**, PRs or comments, and do not use the in-car recon "submit" to test Issue creation.
+- **Do not open Issues**, PRs or comments.
 - **Do not commit often**: finish a change, pass local tests and lint, then push it as one commit. Batch small
   changes; never push repeatedly to fix CI (reproduce and fix locally first).
 - **Keep GitHub API calls to a minimum**: no polling of CI, releases or APIs; check rarely or wait for
@@ -119,15 +119,16 @@ Add package names here as they are identified:
   - In-app updates: `Updates.kt` (GitHub Release check / download / verify / PackageInstaller install), `UpdateJob.kt` (daily check).
     Version sequence = `version-base` + commit count (`app/build.gradle`); pushing to main publishes a Release automatically
     (`release` job; only the newest app change on main is released, wallpaper-feed commits don't count).
-  - Head unit recon (no adb): `Recon.kt` (read-only collection), `ReconUpload.kt` (submits a GitHub Issue; the token is stored only in the head unit's private storage),
-    `LocalShare.kt` (temporary web page opened by scanning a QR code with a phone: the focused report is at the top, ready to copy and
-    send, and submitting it as an Issue with a token is optional; path contains a random string, closes after 15 minutes), `QrCode.kt` (hand-written QR code, tests check fixed hashes).
+  - Head unit recon (no adb): `Recon.kt` (read-only collection), `LocalShare.kt` (temporary web page opened by scanning a QR code with
+    a phone: the focused report at the top, ready to copy and send, and the full report below it once generated on the recon page;
+    path contains a random string, closes after 15 minutes). **Reports are never uploaded and no GitHub token is used**: the owner copies
+    the text and sends it. `QrCode.kt` (hand-written QR code, tests check fixed hashes).
     `ApkStrings.kt` (reads string constants from vendor APKs), `DexScan.kt` (read-only disassembly: lists the call order in methods that use original-car-related strings;
     tests use `test/resources/oem-switch.dex`, built from `oem-switch.java.txt` in the same directory with javac + d8).
-    Submit ("提交") defaults to a **focused report**: analysis targets come from `config/recon-targets.json` in the repository (downloaded when the head unit submits; the same copy is built into `ReconTargets.kt`,
+    The QR page shows the **focused report**: analysis targets come from `config/recon-targets.json` in the repository (downloaded when the report is generated; the same copy is built into `ReconTargets.kt`,
     and tests check that the two match). **To change the analysis focus, edit only this file; no release needed**. It may only decide what to read; never add the ability to write to or switch anything on the head unit.
     Only Full report ("完整报告") lists all apps, system properties, etc.
-    The recon page must stay read-only; never add any operation that changes the head unit's state (disabling, changing settings, etc.). Read recon Issues submitted by the user with GitHub tools.
+    The recon page must stay read-only; never add any operation that changes the head unit's state (disabling, changing settings, etc.). The owner pastes reports into the conversation.
   - Home screen = **Bento dashboard** (`activity_main.xml`): top row clock card | GPS card (big speed + `ui/SunArcView`
     sunrise/sunset arc) | big CarPlay card (id `firstTile`, the square on its left is the current wallpaper, no label above its title);
     bottom row square app tiles (width = height: OEM, favorite apps, all apps), then a narrow dashed "添加" (Add) tile, always last.

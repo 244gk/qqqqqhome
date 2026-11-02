@@ -525,9 +525,8 @@ class MainActivity : Activity() {
         // App tiles are square (width = height, which follows the screen); more tiles scroll horizontally.
         tileWidth = tileHeight
         list.forEachIndexed { i, tile ->
-            // "添加" (Add) is not an app: a narrow dashed tile at the end that doesn't compete with the apps.
-            val w = if (tile.slot == Slot.ADD) (tileHeight * 0.42f).toInt().coerceAtLeast(dp(64)) else tileWidth
-            val lp = LinearLayout.LayoutParams(w, tileHeight)
+            // Every tile in the row is square, "添加" (Add) included (it stays a quiet dashed outline).
+            val lp = LinearLayout.LayoutParams(tileWidth, tileHeight)
             if (i > 0) lp.marginStart = gap
             tiles.addView(makeTileView(tile), lp)
         }

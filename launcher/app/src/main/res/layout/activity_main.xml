@@ -3,7 +3,7 @@
   Home screen = Bento dashboard of dark liquid-glass cards over the wallpaper.
   Top row: clock card (launcher settings icon top-right) | GPS card (speed + sunrise/sunset arc) | large CarPlay card
   (the square on the left is the current wallpaper).
-  Bottom row: square app tiles (OEM, favorite apps, all apps), then a narrow dashed "add" tile last; scrolls horizontally.
+  Bottom row: square app tiles (OEM, favorite apps, all apps), then a square dashed "add" tile last; scrolls horizontally.
   Labels use normal case without decorative dots; each thing is said once (the CarPlay card has no label above its title).
 -->
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"

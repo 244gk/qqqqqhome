@@ -57,7 +57,7 @@ Safety rules are in [AGENTS.md](AGENTS.md).
 ## Step 2: Launcher app (launcher/)
 
 A full-screen Bento dashboard of **dark liquid-glass cards** over the wallpaper (modelled on iOS 26 Liquid Glass): the wallpaper behind
-each card is lightly softened and more vivid, the rim refracts like a lens, the edges catch light, the tint darkens automatically over
+each card is lightly softened and more vivid, the edges catch light, the tint darkens automatically over
 bright backgrounds, and pressing a card makes it glow under the finger. Android 8.1 has no system blur, so all of it is drawn by the app
 and computed only when the wallpaper changes. Kotlin + classic Views, no third-party dependencies, APK about 1 MB (mostly wallpapers).
 

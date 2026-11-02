@@ -56,11 +56,11 @@ class HomeTilesTest {
     }
 
     @Test
-    fun addIsAlwaysLastAndAppTilesAreSquare() {
+    fun addIsAlwaysLastAndEveryTileIsSquare() {
         val t = titles(listOf(DockItem("files", FakeApps.FILES)))
         assertEquals(listOf("原车", "文件", "全部应用", "添加"), t)
         val tiles = home!!.findViewById<ViewGroup>(R.id.tiles)
-        for (i in 0 until tiles.childCount - 1) {
+        for (i in 0 until tiles.childCount) {
             val tile = tiles.getChildAt(i)
             assertEquals("tile $i should be square", tile.layoutParams.height, tile.layoutParams.width)
         }

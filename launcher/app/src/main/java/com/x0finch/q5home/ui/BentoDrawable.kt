@@ -24,9 +24,9 @@ import android.util.LruCache
  *  - [Style.LIFTED]: wider shadow spread, offset further down, so the card looks raised (home tiles, popup cards);
  *  - [Style.RESTING]: very light shadow, slightly darker stroke, brighter card background (settings groups, buttons, pressed state).
  *
- * Liquid glass ([drawGlass]): with a wallpaper, the card shows a softened, more saturated piece of it ([Glass]); the rim magnifies
- * more (lens refraction), the top-left / bottom-right edges catch light, a thin inner line gives thickness, the tint darkens
- * automatically over bright backgrounds ([Glass.luma]) and a soft glow follows the finger while pressed ([setHotspot]).
+ * Liquid glass ([drawGlass]): with a wallpaper, the card shows a softened, more saturated piece of it ([Glass]) exactly behind it,
+ * one edge highlight catches light top-left / bottom-right, the tint darkens automatically over bright backgrounds ([Glass.luma])
+ * and a soft glow follows the finger while pressed ([setHotspot]). No lens bands or stacked outlines: they read as inner frames.
  *
  * Shadows are drawn outside the card (the parent needs clipChildren=false). Android 8.1 hardware acceleration doesn't support blurred shape shadows,
  * so shadows are drawn at 1/4 size into a small cached ALPHA_8 bitmap (software canvas) and scaled up, which is cheap on memory and CPU.
@@ -61,10 +61,7 @@ class BentoDrawable(
     private val tintPaint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val sheenPaint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val rimPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE }
-    private val innerRimPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE }
     private val glowFingerPaint = Paint(Paint.ANTI_ALIAS_FLAG)
-    private val ringClip = android.graphics.Path()
-    private val ringRect = Rect()
     private var hotspotX = -1f
     private var hotspotY = -1f
     private val src = Rect()
@@ -83,14 +80,12 @@ class BentoDrawable(
         solidShader = LinearGradient(0f, bounds.top.toFloat(), 0f, bounds.bottom.toFloat(),
             w.top, w.bottom, Shader.TileMode.CLAMP)
         solidStroke = w.stroke
-        // Glass: a faint sheen across the top, a diagonal rim highlight (bright top-left, softer bottom-right) and a thin inner line.
+        // Glass: a faint sheen across the top, a diagonal rim highlight (bright top-left, softer bottom-right).
         sheenPaint.shader = LinearGradient(0f, bounds.top.toFloat(), 0f, bounds.top + bounds.height() * 0.45f,
             0x1AFFFFFF, Color.TRANSPARENT, Shader.TileMode.CLAMP)
         rimPaint.strokeWidth = density * 1.2f
         rimPaint.shader = LinearGradient(bounds.left.toFloat(), bounds.top.toFloat(), bounds.right.toFloat(), bounds.bottom.toFloat(),
             intArrayOf(0x8CFFFFFF.toInt(), 0x14FFFFFF, 0x0AFFFFFF, 0x47FFFFFF), floatArrayOf(0f, 0.35f, 0.65f, 1f), Shader.TileMode.CLAMP)
-        innerRimPaint.strokeWidth = density
-        innerRimPaint.color = 0x1FFFFFFF
         clip.reset()
         clip.addRoundRect(RectF(bounds), radiusPx, radiusPx, android.graphics.Path.Direction.CW)
         strokePaint.strokeWidth = density.coerceAtLeast(1f) // 1dp ≈ 1.5px, which looks like a nice thin line on the head unit
@@ -150,26 +145,15 @@ class BentoDrawable(
 
     /**
      * Liquid glass. Returns false (draw a solid card instead) when the host View or the background is not available.
-     * Three nested bands of the background: the rim is magnified most, the middle least, which reads as refraction through thick glass.
      */
     private fun drawGlass(canvas: Canvas): Boolean {
         val host = hostView() ?: return false
         val b = bounds
         val save = canvas.save()
         canvas.clipPath(clip)
-        if (!Glass.draw(canvas, host, b, alphaMul, 1.16f)) { canvas.restoreToCount(save); return false }
-        for ((insetDp, zoom) in listOf(5f to 1.09f, 12f to 1.03f)) {
-            val inset = (insetDp * density).toInt()
-            if (b.width() <= inset * 2 || b.height() <= inset * 2) break
-            ringRect.set(b.left + inset, b.top + inset, b.right - inset, b.bottom - inset)
-            val r = (radiusPx - inset).coerceAtLeast(0f)
-            ringClip.reset()
-            ringClip.addRoundRect(RectF(ringRect), r, r, android.graphics.Path.Direction.CW)
-            canvas.save()
-            canvas.clipPath(ringClip)
-            Glass.draw(canvas, host, ringRect, alphaMul, zoom)
-            canvas.restore()
-        }
+        // One layer of the softened background, exactly behind the card (no magnification): any second, differently magnified
+        // layer near the rim shows the background shifted and reads as an inner frame, however smoothly it is faded.
+        if (!Glass.draw(canvas, host, b, alphaMul, 1f)) { canvas.restoreToCount(save); return false }
         // Tint: very transparent, darker over bright backgrounds so white text stays readable; pressed cards are a little brighter.
         val luma = Glass.luma(host, b)
         val tintAlpha = (0x30 + luma * 0x70).toInt().coerceIn(0x30, 0xA0)
@@ -187,17 +171,12 @@ class BentoDrawable(
             canvas.drawRect(b, glowFingerPaint)
         }
         canvas.restoreToCount(save)
-        // Edge highlight + inner line (thickness).
+        // A single edge highlight (one line, no stacked outlines).
         rect.set(b)
         val half = rimPaint.strokeWidth / 2
         rect.inset(half, half)
         rimPaint.alpha = alphaMul
         canvas.drawRoundRect(rect, radiusPx - half, radiusPx - half, rimPaint)
-        val inner = rimPaint.strokeWidth + innerRimPaint.strokeWidth / 2
-        rect.set(b)
-        rect.inset(inner, inner)
-        innerRimPaint.alpha = 0x1F * alphaMul / 255
-        canvas.drawRoundRect(rect, radiusPx - inner, radiusPx - inner, innerRimPaint)
         return true
     }
 

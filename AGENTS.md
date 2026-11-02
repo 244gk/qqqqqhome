@@ -99,8 +99,8 @@ Add package names here as they are identified:
     shadows; parent layouts need `Ui.allowShadows` to turn off clipping). The page background is the wallpaper; behind each card
     `Glass` draws a lightly softened, more saturated copy of it (no system blur on 8.1: downscale to 1/6, two software box-blur
     passes, recomputed only when the wallpaper changes, computed before the first frame via `Glass.updateBeforeDraw`).
-    `BentoDrawable.drawGlass` adds the rest: the rim is magnified more than the middle (lens refraction), a diagonal edge highlight
-    plus a thin inner line (thickness), a very transparent tint that darkens over bright backgrounds (`Glass.luma`), and a soft glow
+    `BentoDrawable.drawGlass` adds the rest: one layer of that background exactly behind the card (no lens / magnified rim bands
+    and no stacked outlines: they read as an inner frame), a single diagonal edge highlight, a very transparent tint that darkens over bright backgrounds (`Glass.luma`), and a soft glow
     under the finger while pressed (`setHotspot`). Scroll containers need `Glass.followScroll`, otherwise the glass is misaligned.
     **Dark only** (the owner's choice; `Ui.resolveDark` always returns true); the `appearance` setting is still read and written
     but no longer applied. Take all colors from `Ui`, never hardcode them.
@@ -133,7 +133,7 @@ Add package names here as they are identified:
     The recon page must stay read-only; never add any operation that changes the head unit's state (disabling, changing settings, etc.). The owner pastes reports into the conversation.
   - Home screen = **Bento dashboard** (`activity_main.xml`): top row clock card | GPS card (big speed + `ui/SunArcView`
     sunrise/sunset arc) | big CarPlay card (id `firstTile`, the square on its left is the current wallpaper, no label above its title);
-    bottom row square app tiles (width = height: OEM, favorite apps, all apps), then a narrow dashed "添加" (Add) tile, always last.
+    bottom row square app tiles (width = height: OEM, favorite apps, all apps), then a square dashed "添加" (Add) tile, always last.
     Launcher settings is the small icon in the clock card's top-right corner (id `deskSettings`, icon only, no background, an accent
     ring only when selected with the knob; it never takes an app tile). Common apps with English labels (e.g. Settings) show the
     unified Chinese name. More tiles scroll horizontally; swiping on the clock / GPS cards scrolls them too.

@@ -707,6 +707,14 @@ class SettingsActivity : Activity() {
             else -> "要提交到 GitHub 需要令牌；不提交也行，扫码网页里可以直接复制报告"
         }
         val canSubmit = upload.hasToken && !submitting
+        // Scanning the QR code and copying the focused report is the main way to share it, so that card comes first
+        // (and the QR code stays on screen when it appears).
+        card(*listOfNotNull(shareRow(), if (upload.hasToken) row(R.drawable.ui_delete, "清除令牌", "删除车机上保存的 GitHub 令牌",
+            Ui.pill(this, "清除", Ui.PillStyle.DANGER) {
+                upload.clearToken()
+                overlay.snackbar("已清除令牌")
+                render()
+            }) else null).toTypedArray())
         tilesRow(
             tile(R.drawable.ui_update, "提交重点报告", sub = status, subLines = 4,
                 action = Ui.pill(this, if (submitting) "进行中…" else "提交", Ui.PillStyle.PRIMARY) { submitReport(full = false) }.apply {
@@ -719,12 +727,6 @@ class SettingsActivity : Activity() {
                     alpha = if (isEnabled) 1f else 0.4f
                 }).first to 1f,
         )
-        card(*listOfNotNull(shareRow(), if (upload.hasToken) row(R.drawable.ui_delete, "清除令牌", "删除车机上保存的 GitHub 令牌",
-            Ui.pill(this, "清除", Ui.PillStyle.DANGER) {
-                upload.clearToken()
-                overlay.snackbar("已清除令牌")
-                render()
-            }) else null).toTypedArray())
         upload.lastIssueUrl?.let { url ->
             card(qrRow(url, "已提交到 GitHub", url, null), title = "Issue 链接（手机扫码打开）")
         }

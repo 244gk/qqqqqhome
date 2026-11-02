@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">Q5 Home</string>
+    <string name="app_name">q5home</string>
     <string name="settings">桌面设置</string>
     <string name="carplay">CarPlay</string>
     <string name="oem">原车</string>

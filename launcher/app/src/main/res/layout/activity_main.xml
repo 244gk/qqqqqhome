@@ -1,9 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  Home screen = Bento dashboard: a solid-color page filled with cards.
-  Top row: clock card | GPS card (speed + sunrise/sunset arc) | large CarPlay card (the square on the left is the current wallpaper).
-  Bottom row: app tiles (OEM, favorite apps, add, all apps, launcher settings); scrolls horizontally when there are more.
-  The wallpaper is shown in full only in the CarPlay card; the page background shows just a faint hint of it.
+  Home screen = Bento dashboard of dark liquid-glass cards over the wallpaper.
+  Top row: clock card (launcher settings icon top-right) | GPS card (speed + sunrise/sunset arc) | large CarPlay card
+  (the square on the left is the current wallpaper).
+  Bottom row: square app tiles (OEM, favorite apps, all apps), then a narrow dashed "add" tile last; scrolls horizontally.
+  Labels use normal case without decorative dots; each thing is said once (the CarPlay card has no label above its title).
 -->
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/root"
@@ -63,31 +64,45 @@
                 android:orientation="vertical"
                 android:padding="20dp">
 
-                <TextView
-                    android:id="@+id/greeting"
-                    android:layout_width="wrap_content"
+                <!-- First row: greeting + the launcher settings icon (no background; it does not take an app tile). -->
+                <LinearLayout
+                    android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:singleLine="true"
-                    android:textSize="11sp"
-                    android:fontFamily="@font/outfit_medium"
-                    android:letterSpacing="0.16"
-                    android:textAllCaps="true" />
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal">
+
+                    <TextView
+                        android:id="@+id/greeting"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:singleLine="true"
+                        android:ellipsize="end"
+                        android:textSize="13sp"
+                        android:fontFamily="@font/outfit_medium" />
+
+                    <ImageView
+                        android:id="@+id/deskSettings"
+                        android:layout_width="40dp"
+                        android:layout_height="40dp"
+                        android:layout_marginStart="8dp"
+                        android:padding="10dp"
+                        android:src="@drawable/ui_tune"
+                        android:contentDescription="@string/settings"
+                        android:focusable="true"
+                        android:clickable="true" />
+                </LinearLayout>
 
                 <Space
                     android:layout_width="match_parent"
                     android:layout_height="0dp"
                     android:layout_weight="1" />
 
-                <TextClock
-                    android:id="@+id/clock"
+                <!-- Clock: changed digits roll up when the minute changes (RollingText, added in code). -->
+                <FrameLayout
+                    android:id="@+id/clockHolder"
                     android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:format12Hour="HH:mm"
-                    android:format24Hour="HH:mm"
-                    android:textSize="64sp"
-                    android:fontFamily="@font/outfit_light"
-                    android:letterSpacing="-0.04"
-                    android:includeFontPadding="false" />
+                    android:layout_height="wrap_content" />
 
                 <!-- The date is always shown in Chinese regardless of system language (the head unit may run an English system). -->
                 <TextView
@@ -117,7 +132,8 @@
                     android:visibility="gone" />
             </LinearLayout>
 
-            <!-- GPS card: large speed, heading / altitude, sunrise/sunset arc (not clickable). -->
+            <!-- GPS card: large speed, heading / altitude, sunrise/sunset arc. Not clickable itself; without location permission a tap
+                 (handled in MainActivity.forwardSwipesToTiles) opens the GPS settings page. -->
             <LinearLayout
                 android:id="@+id/gpsCard"
                 android:layout_width="0dp"
@@ -132,26 +148,21 @@
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:singleLine="true"
-                    android:textSize="11sp"
-                    android:fontFamily="@font/outfit_medium"
-                    android:letterSpacing="0.16"
-                    android:textAllCaps="true" />
+                    android:textSize="13sp"
+                    android:fontFamily="@font/outfit_medium" />
 
+                <!-- Speed row: hidden without a fix, leaving a single status line (no big dash). -->
                 <LinearLayout
+                    android:id="@+id/speedRow"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="8dp"
                     android:orientation="horizontal">
 
-                    <TextView
-                        android:id="@+id/speed"
+                    <FrameLayout
+                        android:id="@+id/speedHolder"
                         android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:singleLine="true"
-                        android:textSize="40sp"
-                        android:fontFamily="@font/outfit_light"
-                        android:letterSpacing="-0.03"
-                        android:includeFontPadding="false" />
+                        android:layout_height="wrap_content" />
 
                     <TextView
                         android:id="@+id/speedUnit"
@@ -216,16 +227,6 @@
                     android:paddingEnd="6dp"
                     android:orientation="vertical">
 
-                    <TextView
-                        android:id="@+id/carplayLabel"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:singleLine="true"
-                        android:textSize="11sp"
-                        android:fontFamily="@font/outfit_medium"
-                        android:letterSpacing="0.16"
-                        android:textAllCaps="true" />
-
                     <Space
                         android:layout_width="match_parent"
                         android:layout_height="0dp"
@@ -237,7 +238,7 @@
                         android:layout_height="wrap_content"
                         android:singleLine="true"
                         android:text="@string/carplay"
-                        android:textSize="34sp"
+                        android:textSize="28sp"
                         android:fontFamily="@font/outfit_light"
                         android:letterSpacing="-0.02"
                         android:includeFontPadding="false" />

@@ -6,7 +6,9 @@ import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.LayerDrawable
 
 /**
- * Uniform-style home screen icons: rounded gradient background + white glyph (Material Symbols Rounded).
+ * Uniform home screen icons (filled Material Symbols Rounded). The home screen, settings and the icon grid use [glyph]: a white
+ * glyph placed directly on the glass card, no colored square (one icon set, one color). [badge] (rounded gradient background)
+ * is only used for the CarPlay card cover when the wallpaper is solid black.
  * A tile only stores "icon key + target app", so switching apps later only changes the target (app id); the icon stays.
  */
 object Icons {
@@ -52,6 +54,10 @@ object Icons {
             else -> null
         }
     }
+
+    /** The glyph alone, tinted [tint] (white by default). */
+    fun glyph(context: Context, icon: Icon, tint: Int = 0xFFFFFFFF.toInt()): Drawable =
+        context.getDrawable(icon.glyph)!!.mutate().apply { setTint(tint) }
 
     /** Rendered icon: rounded gradient background + centered white glyph. */
     fun badge(context: Context, icon: Icon): Drawable {

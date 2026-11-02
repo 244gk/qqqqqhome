@@ -7,6 +7,7 @@ import android.view.MotionEvent
 import android.view.View
 import android.widget.HorizontalScrollView
 import androidx.test.core.app.ApplicationProvider
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -47,5 +48,29 @@ class HomeSwipeTest {
         send(MotionEvent.ACTION_UP, 30f, 13 * 16L)
         shadowOf(Looper.getMainLooper()).idle()
         assertTrue("tile list should have scrolled, scrollX=${scroll.scrollX}", scroll.scrollX > 300)
+    }
+
+    /** Without location permission, a tap (no drag) on the GPS card opens the "GPS 与 4G" settings page. */
+    @Test
+    fun tapGpsCardWithoutPermissionOpensSignalSettings() {
+        RuntimeEnvironment.setQualifiers("w1280dp-h480dp-land-mdpi")
+        FakeApps.installCar(context)
+        val home = Robolectric.buildActivity(MainActivity::class.java).setup().visible().get()
+        shadowOf(Looper.getMainLooper()).idle()
+        val root = home.findViewById<View>(R.id.root)
+        val card = home.findViewById<View>(R.id.gpsCard)
+        val pos = IntArray(2)
+        card.getLocationInWindow(pos)
+        val x = pos[0] + card.width / 2f
+        val y = pos[1] + card.height / 2f
+        val t = SystemClock.uptimeMillis()
+        for ((action, dt) in listOf(MotionEvent.ACTION_DOWN to 0L, MotionEvent.ACTION_UP to 60L)) {
+            val e = MotionEvent.obtain(t, t + dt, action, x, y, 0)
+            root.dispatchTouchEvent(e)
+            e.recycle()
+        }
+        val next = shadowOf(home).nextStartedActivity
+        assertEquals(SettingsActivity::class.java.name, next?.component?.className)
+        assertEquals(SettingsActivity.SECTION_SIGNAL, next?.getStringExtra(SettingsActivity.EXTRA_SECTION))
     }
 }

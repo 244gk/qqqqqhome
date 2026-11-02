@@ -15,17 +15,19 @@ import org.robolectric.RuntimeEnvironment
 import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config as RC
 
-/** Tile titles: use the unified Chinese name when the icon matches the app, otherwise the app's own name. */
+/** Tile titles (unified Chinese name when the icon matches the app, otherwise the app's own name), order and shape. */
 @RunWith(RobolectricTestRunner::class)
 @RC(sdk = [31])
 class HomeTilesTest {
     private val context: Context = ApplicationProvider.getApplicationContext()
+    private var home: MainActivity? = null
 
     private fun titles(dock: List<DockItem>): List<String> {
         RuntimeEnvironment.setQualifiers("w1280dp-h480dp-land-mdpi")
         FakeApps.installCar(context)
         Config(context).setDock(dock)
         val home = Robolectric.buildActivity(MainActivity::class.java).setup().visible().get()
+        this.home = home
         shadowOf(Looper.getMainLooper()).idle()
         val tiles = home.findViewById<ViewGroup>(R.id.tiles)
         // The line with the largest text size in each tile is the title.
@@ -48,7 +50,19 @@ class HomeTilesTest {
 
     @Test
     fun mismatchedOrAppIconUsesAppName() {
+        // An English system label ("Settings") still gets the unified Chinese name; a Chinese label stays as is.
         val t = titles(listOf(DockItem("nav", Targets.SYSTEM_SETTINGS), DockItem(null, FakeApps.NAVI)))
-        assertEquals(listOf("Settings", "高德地图车机版"), t.subList(1, 3))
+        assertEquals(listOf("系统设置", "高德地图车机版"), t.subList(1, 3))
+    }
+
+    @Test
+    fun addIsAlwaysLastAndAppTilesAreSquare() {
+        val t = titles(listOf(DockItem("files", FakeApps.FILES)))
+        assertEquals(listOf("原车", "文件", "全部应用", "添加"), t)
+        val tiles = home!!.findViewById<ViewGroup>(R.id.tiles)
+        for (i in 0 until tiles.childCount - 1) {
+            val tile = tiles.getChildAt(i)
+            assertEquals("tile $i should be square", tile.layoutParams.height, tile.layoutParams.width)
+        }
     }
 }

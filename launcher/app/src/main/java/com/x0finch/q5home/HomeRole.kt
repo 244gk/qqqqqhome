@@ -14,7 +14,7 @@ import android.provider.Settings
  */
 object HomeRole {
 
-    /** Whether Q5 Home is currently the default launcher. */
+    /** Whether q5home is currently the default launcher. */
     fun isDefault(context: Context): Boolean {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             val rm = context.getSystemService(RoleManager::class.java)

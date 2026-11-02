@@ -11,8 +11,8 @@ import java.security.SecureRandom
 import kotlin.concurrent.thread
 
 /**
- * Temporary web page on the head unit: opened on a phone by scanning a QR code, used to view / copy the recon report or
- * paste a GitHub token. Runs only while the "车机摸底" (recon) settings page is open and closes itself after [TIMEOUT_MS];
+ * Temporary web page on the head unit: opened on a phone by scanning a QR code; it shows the focused recon report to copy
+ * (the owner can just send the copied text) and optionally accepts a GitHub token to submit it as an Issue. Runs only while the "车机摸底" (recon) settings page is open and closes itself after [TIMEOUT_MS];
  * the path contains a random string so other devices on the same network can't guess it.
  *
  * [report] returns the report Markdown (null while it is still being generated); [onToken] saves the received token and
@@ -83,26 +83,40 @@ class LocalShare(
         out.flush()
     }
 
+    /**
+     * The page: the focused report comes first (copy it or download it — sending the copied text is enough), then the optional
+     * GitHub Issue submission with a token. While the report is still being generated the page refreshes itself every 5 s.
+     */
     private fun page(message: String?): String {
         val md = report()
+        val refresh = if (md == null && message == null) "<meta http-equiv=\"refresh\" content=\"5\">" else ""
         return """
             <!doctype html><html lang="zh"><head><meta charset="utf-8">
             <meta name="viewport" content="width=device-width,initial-scale=1">
-            <title>Q5 Home 车机摸底</title>
+            $refresh
+            <title>q5home 车机摸底</title>
             <style>
-              body{margin:0;padding:16px;background:#111;color:#eee;font:16px/1.5 -apple-system,system-ui,sans-serif}
+              body{margin:0;padding:16px;background:#0f0f11;color:#eee;font:16px/1.5 -apple-system,system-ui,sans-serif}
               h1{font-weight:300;font-size:26px;margin:8px 0 4px} h2{font-size:17px;margin:24px 0 8px}
-              .card{background:#1c1c1e;border:1px solid #333;border-radius:16px;padding:16px;margin:12px 0}
-              .msg{background:#12351f;border-color:#8ef0b0;color:#8ef0b0;word-break:break-all}
+              .card{background:#1c1c1f;border:1px solid #333;border-radius:16px;padding:16px;margin:12px 0}
+              .msg{background:#161a3a;border-color:#6e7dff;color:#aab3ff;word-break:break-all}
               input{width:100%;box-sizing:border-box;padding:12px;border-radius:12px;border:1px solid #444;background:#000;color:#fff;font-size:16px}
-              button,.btn{display:inline-block;margin-top:12px;padding:12px 20px;border:0;border-radius:24px;background:#8ef0b0;color:#0b2a17;font-size:16px;font-weight:600;text-decoration:none}
-              .sec{background:#333;color:#fff} small{color:#999} a{color:#8ef0b0}
-              textarea{width:100%;box-sizing:border-box;height:40vh;background:#000;color:#ccc;border:1px solid #333;border-radius:12px;font:12px/1.4 ui-monospace,monospace}
+              button,.btn{display:inline-block;margin-top:12px;margin-right:8px;padding:12px 20px;border:0;border-radius:24px;background:#6e7dff;color:#fff;font-size:16px;font-weight:600;text-decoration:none}
+              .sec{background:#333;color:#fff} small{color:#999} a{color:#aab3ff}
+              textarea{width:100%;box-sizing:border-box;height:45vh;background:#000;color:#ccc;border:1px solid #333;border-radius:12px;font:12px/1.4 ui-monospace,monospace}
               ol{padding-left:20px}
             </style></head><body>
-            <h1>Q5 Home 车机摸底</h1><small>车机上的临时网页，离开摸底页面或 15 分钟后关闭。只读，不会改动车机。</small>
+            <h1>q5home 车机摸底</h1><small>车机上的临时网页，离开摸底页面或 15 分钟后关闭。只读，不会改动车机。</small>
             ${message?.let { "<div class=\"card msg\">${esc(it).replace(Regex("(https://\\S+)"), "<a href=\"$1\">$1</a>")}</div>" } ?: ""}
-            <h2>提交到 GitHub Issue</h2>
+            <h2>重点报告</h2>
+            <div class="card">
+              ${if (md == null) "正在生成重点报告（几十秒），本页会自动刷新…" else """
+              <button onclick="var t=document.getElementById('r');t.select();document.execCommand('copy');this.textContent='已复制'">复制全部</button>
+              <a class="btn sec" href="report.md" download="q5-recon.md">下载 report.md</a>
+              <p><small>复制后直接发出去就行，不一定要提交到 GitHub。</small></p>
+              <p><textarea id="r" readonly>${esc(md)}</textarea></p>"""}
+            </div>
+            <h2>提交到 GitHub Issue（可选）</h2>
             <div class="card">
               <ol>
                 <li>打开 <a href="${ReconUpload.TOKEN_PAGE}">GitHub 新建细粒度令牌</a>（Fine-grained token）</li>
@@ -114,14 +128,7 @@ class LocalShare(
                 <input name="token" type="password" autocomplete="off" placeholder="github_pat_…">
                 <button>保存令牌并提交报告</button>
               </form>
-              <small>令牌只存在车机上的 Q5 Home 里，可以在摸底页面清除；以后再提交不用重新粘贴。</small>
-            </div>
-            <h2>报告</h2>
-            <div class="card">
-              ${if (md == null) "报告还在生成，稍后刷新本页。" else """
-              <a class="btn sec" href="report.md" download="q5-recon.md">下载 report.md</a>
-              <button class="sec" onclick="var t=document.getElementById('r');t.select();document.execCommand('copy');this.textContent='已复制'">复制全部</button>
-              <p><textarea id="r" readonly>${esc(md)}</textarea></p>"""}
+              <small>令牌只存在车机上的 q5home 里，可以在摸底页面清除；以后再提交不用重新粘贴。</small>
             </div>
             </body></html>
         """.trimIndent()

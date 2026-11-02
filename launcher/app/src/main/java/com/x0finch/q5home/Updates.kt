@@ -140,7 +140,7 @@ class Updates(private val context: Context, private val apiUrl: String = DEFAULT
     /** Final check before install: it is this app and a newer version. */
     fun verify(apk: File): String? {
         val info = context.packageManager.getPackageArchiveInfo(apk.path, 0) ?: return "不是有效的安装包"
-        if (info.packageName != context.packageName) return "安装包不是 Q5 Home（${info.packageName}）"
+        if (info.packageName != context.packageName) return "安装包不是 q5home（${info.packageName}）"
         if (info.versionCodeCompat <= currentVersionCode) return "安装包版本不比当前新"
         return null
     }

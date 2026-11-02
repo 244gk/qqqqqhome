@@ -38,19 +38,11 @@ class ScreenshotTest {
         File(outDir, "$name.png").outputStream().use { bmp.compress(Bitmap.CompressFormat.PNG, 100, it) }
     }
 
-    /** Screenshots must be stable: light (daytime) by default; names containing -dark are forced dark. */
-    @org.junit.Before
-    fun lightByDefault() = Config(context).setAppearance(Config.APPEARANCE_LIGHT)
-
-    private fun dark() = Config(context).setAppearance(Config.APPEARANCE_DARK)
-
     private fun home(qualifiers: String, name: String, wallpaper: String = "stars") {
         RuntimeEnvironment.setQualifiers(qualifiers)
         FakeApps.installCar(context)
-        Config(context).apply {
-            setWallpaper(wallpaper)
-            addToDock(FakeApps.NAVI)
-        }
+        // The same default layout as in the car (favorite apps: Files and Settings only); also used for the README previews.
+        Config(context).setWallpaper(wallpaper)
         shoot(Robolectric.buildActivity(MainActivity::class.java).setup().get(), name)
     }
 
@@ -58,7 +50,15 @@ class ScreenshotTest {
     @Test fun home1920x720() = home("w1280dp-h480dp-land-hdpi", "home-1920x720", "city")
     @Test fun home1024x600() = home("w1024dp-h600dp-land-mdpi", "home-1024x600", "road")
     @Test fun homeBlack() = home("w1280dp-h480dp-land-mdpi", "home-black", Wallpapers.NONE)
-    @Test fun homeDark() { dark(); home("w1280dp-h480dp-land-hdpi", "home-1920x720-dark", "city") }
+
+    /** A favorite app using its own icon: the icon is the same size and position as the white unified glyphs. */
+    @Test
+    fun homeCustomAppIcon() {
+        RuntimeEnvironment.setQualifiers("w1280dp-h480dp-land-mdpi")
+        FakeApps.installCar(context)
+        Config(context).apply { setDock(listOf(DockItem("files", FakeApps.FILES), DockItem(null, FakeApps.NAVI))) }
+        shoot(Robolectric.buildActivity(MainActivity::class.java).setup().get(), "home-custom-app")
+    }
 
     @Test
     fun library() {
@@ -104,8 +104,8 @@ class ScreenshotTest {
         shoot(home, "ui-icon-picker")
     }
 
-    private fun settings(section: String, name: String) {
-        RuntimeEnvironment.setQualifiers("w1280dp-h480dp-land-mdpi")
+    private fun settings(section: String, name: String, qualifiers: String = "w1280dp-h480dp-land-mdpi") {
+        RuntimeEnvironment.setQualifiers(qualifiers)
         FakeApps.installCar(context)
         Config(context).setWallpaper("city")
         val intent = Intent(context, SettingsActivity::class.java).putExtra(SettingsActivity.EXTRA_SECTION, section)
@@ -113,7 +113,10 @@ class ScreenshotTest {
     }
 
     @Test fun settingsWallpaper() = settings(SettingsActivity.SECTION_WALLPAPER, "ui-settings-wallpaper")
-    @Test fun settingsWallpaperDark() { dark(); settings(SettingsActivity.SECTION_WALLPAPER, "ui-settings-wallpaper-dark") }
+    @Test fun settingsWallpaper1024() =
+        settings(SettingsActivity.SECTION_WALLPAPER, "ui-settings-wallpaper-1024x600", "w1024dp-h600dp-land-mdpi")
+    @Test fun settingsWallpaper1920() =
+        settings(SettingsActivity.SECTION_WALLPAPER, "ui-settings-wallpaper-1920x720", "w1280dp-h480dp-land-hdpi")
     @Test fun settingsCarPlay() = settings(SettingsActivity.SECTION_CARPLAY, "ui-settings-carplay")
     @Test fun settingsAdvanced() = settings(SettingsActivity.SECTION_ADVANCED, "ui-settings-advanced")
     @Test fun settingsSignal() = settings(SettingsActivity.SECTION_SIGNAL, "ui-settings-signal")

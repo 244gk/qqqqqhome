@@ -218,6 +218,7 @@ def check_share(demo, out):
     """Decode the QR code from the screenshot, open the head unit's temporary web page via adb forward, and confirm the page and report are reachable (the report is saved as a sample)."""
     import urllib.request
     import urllib.parse
+    import urllib.error
     try:
         import cv2
     except ImportError:
@@ -235,9 +236,18 @@ def check_share(demo, out):
     parsed = urllib.parse.urlparse(url)
     adb("forward", "tcp:18765", f"tcp:{parsed.port}")
     local = f"http://127.0.0.1:18765{parsed.path}"
+    # The page shows the focused report at the top; it takes a while to generate (503 until ready).
+    report = ""
+    for _ in range(30):
+        try:
+            report = urllib.request.urlopen(local + "report.md", timeout=10).read().decode("utf-8")
+            break
+        except urllib.error.HTTPError as e:
+            if e.code != 503:
+                raise
+            time.sleep(2)
     page = urllib.request.urlopen(local, timeout=10).read().decode("utf-8")
-    report = urllib.request.urlopen(local + "report.md", timeout=10).read().decode("utf-8")
-    if "车机摸底" not in page or "## 系统" not in report:
+    if "车机摸底" not in page or "重点报告" not in page or "## 版本" not in report:
         raise RuntimeError("temporary web page content is wrong")
     with open(os.path.join(out, "recon-page.html"), "w", encoding="utf-8") as f:
         f.write(page)
@@ -324,7 +334,7 @@ def main():
     failed = None
     try:
         time.sleep(1)
-        demo.caption("① 首页 Bento 仪表盘：时钟卡、GPS 卡（车速 + 日出日落弧线）、CarPlay 大卡、下排应用卡")
+        demo.caption("① 首页 Bento 仪表盘：深色液态玻璃卡片；时钟卡（换分钟时数字上滚）、GPS 卡、CarPlay 大卡；下排应用卡，最后是虚线「添加」")
         time.sleep(2)
         demo.shot("home")
 
@@ -353,37 +363,34 @@ def main():
         demo.shot("carplay-menu")
         demo.key("KEYCODE_BACK", "按键：返回，关闭菜单")
 
-        demo.tap("桌面设置", "⑨ 点「桌面设置」卡片 → 整页设置（桌面自己的设置，不是安卓系统设置）")
+        demo.tap("桌面设置", "⑨ 点时钟卡右上角的「桌面设置」小图标 → 整页设置（桌面自己的设置，不是安卓系统设置）")
         demo.shot("settings-wallpaper")
-        demo.tap("浅色", "⑩ 外观选「浅色」→ 极简 Bento 卡片（默认「自动」：白天浅色、日落后深色）")
-        demo.find("固定浅色")
-        demo.shot("settings-light")
-        demo.tap("每小时", "⑪ 轮换频率选「每小时」→ 自动轮换，每小时换一张（还有 30 分钟 / 3 小时 / 每天）")
-        demo.find("当前壁纸：自动轮换 · 每小时")
+        demo.tap("每小时", "⑩ 「自动轮换」选「每小时」→ 每小时换一张（还有 30 分钟 / 3 小时 / 每天）")
+        demo.find("当前：自动轮换 · 每小时")
         demo.shot("settings-wallpaper-hourly")
-        demo.tap("按日出日落分白天 / 夜晚", "⑫ 打开「按日出日落分白天 / 夜晚」→ 白天轮换白天的壁纸，日落后换夜景（按 GPS 位置算）")
+        demo.tap("按日出日落分白天 / 夜晚", "⑪ 打开「按日出日落分白天 / 夜晚」→ 白天轮换白天的壁纸，日落后换夜景（按 GPS 位置算）")
         demo.shot("settings-wallpaper-sun")
-        demo.tap("城市夜景", "⑬ 点缩略图「城市夜景」换壁纸")
+        demo.tap("城市夜景", "⑫ 点缩略图「城市夜景」换壁纸")
         demo.shot("settings-wallpaper-city")
-        demo.tap("CarPlay 与原车", "⑭ 左侧切到「CarPlay 与原车」")
+        demo.tap("CarPlay 与原车", "⑬ 左侧切到「CarPlay 与原车」")
         demo.shot("settings-carplay")
-        demo.tap("开机自动进入 CarPlay", "⑮ 打开「开机自动进入 CarPlay」开关")
+        demo.tap("开机自动进入 CarPlay", "⑭ 打开「开机自动进入 CarPlay」开关")
         demo.shot("settings-toggle")
-        demo.tap("高级", "⑯ 左侧切到「高级」")
+        demo.tap("高级", "⑮ 左侧切到「高级」")
         demo.shot("settings-advanced")
-        demo.tap("恢复默认布局", "⑰ 点「恢复默认布局」→ 确认卡片")
+        demo.tap("恢复默认布局", "⑯ 点「恢复默认布局」→ 确认卡片")
         demo.shot("confirm")
-        demo.tap("取消", "⑱ 点「取消」")
-        demo.tap("版本更新", "⑲ 左侧切到「版本更新」→ 检查 GitHub Release", prefix=True)
+        demo.tap("取消", "⑰ 点「取消」")
+        demo.tap("版本更新", "⑱ 左侧切到「版本更新」→ 检查 GitHub Release", prefix=True)
         time.sleep(3)  # wait for the check result
         demo.shot("settings-update")
-        demo.tap("车机摸底", "⑳ 左侧切到「车机摸底」→ 只读查系统、调试线索、原车 / CarPlay 组件")
+        demo.tap("车机摸底", "⑲ 左侧切到「车机摸底」→ 只读查系统、调试线索、原车 / CarPlay 组件")
         demo.find("要点")  # recon runs in the background; the summary appearing means it finished
         demo.shot("settings-recon")
-        demo.tap("生成二维码", "㉑ 点「生成二维码」→ 车机开临时网页，手机扫码看报告、粘贴 GitHub 令牌")
+        demo.tap("生成二维码", "⑳ 点「生成二维码」→ 车机开临时网页：手机扫码直接看重点报告，可以复制发出去")
         demo.shot("settings-recon-qr")
         check_share(demo, args.out)
-        demo.tap("GPS 与 4G", "㉒ 左侧切到「GPS 与 4G」→ 卫星、定位、SIM 卡、4G 信号（只读）")
+        demo.tap("GPS 与 4G", "㉑ 左侧切到「GPS 与 4G」→ 卫星、定位、SIM 卡、4G 信号（只读）")
         demo.find("卫星")
         time.sleep(2)  # wait for satellite / location callbacks to refresh
         demo.shot("settings-signal")
@@ -393,35 +400,36 @@ def main():
             if demo.exists("测试"):
                 break
             demo.swipe(1100, 620, 1100, 160, "继续往下翻")
-        demo.tap("测试", "㉓ 点「4G 上网测试」→ 临时只走移动网络访问一次测试地址")
+        demo.tap("测试", "㉒ 点「4G 上网测试」→ 临时只走移动网络访问一次测试地址")
         for _ in range(10):  # wait up to 20 s for the result
             if not demo.exists("测试中…"):
                 break
             time.sleep(2)
         demo.shot("settings-signal-probe")
-        demo.tap("返回桌面", "㉔ 点「返回桌面」")
+        demo.swipe(4, 360, 700, 360, "㉓ 从屏幕左边缘往右滑 → 回到桌面（设置页没有返回按钮，按 HOME 也行）")
+        demo.find("CarPlay")
         demo.shot("home-city")
 
         # Rotary knob / D-pad: focus moves between tiles.
-        demo.key("KEYCODE_DPAD_DOWN", "㉕ 方向键 ↓（模拟旋钮）：焦点从 CarPlay 大卡开始")
-        demo.key("KEYCODE_DPAD_DOWN", "㉖ 方向键 ↓ →：焦点移到下排应用卡")
-        demo.key("KEYCODE_DPAD_RIGHT", "㉖ 方向键 ↓ →：焦点移到下排应用卡", times=2)
+        demo.key("KEYCODE_DPAD_DOWN", "㉔ 方向键 ↓（模拟旋钮）：焦点从 CarPlay 大卡开始")
+        demo.key("KEYCODE_DPAD_DOWN", "㉕ 方向键 ↓ →：焦点移到下排应用卡")
+        demo.key("KEYCODE_DPAD_RIGHT", "㉕ 方向键 ↓ →：焦点移到下排应用卡", times=2)
         demo.shot("dpad-focus")
         demo.home()
 
         # Safe mode: make the launcher crash 3 times in a row on purpose (it only crashes when the marker file exists, see MainActivity.maybeCrashForTest)
         marker = f"/sdcard/Android/data/{PKG}/files/crash-test"
         shell(f"touch {marker}")
-        demo.caption("㉗ 测试：让桌面故意连续崩溃 3 次")
+        demo.caption("㉖ 测试：让桌面故意连续崩溃 3 次")
         for _ in range(3):
             shell(f"am start -n {HOME} --ez crash_test true", check=False)
             time.sleep(2.5)
         shell(f"rm -f {marker}")
-        demo.caption("㉘ 第 3 次崩溃后，桌面自动进入安全模式（不会卡在反复崩溃里）")
+        demo.caption("㉗ 第 3 次崩溃后，桌面自动进入安全模式（不会卡在反复崩溃里）")
         time.sleep(2)
         # When the default launcher keeps crashing, Android itself clears the default and asks the user to choose again (same in the car, where the factory launcher can be picked instead).
-        if demo.exists("Select a Home app") or demo.exists("Q5 Home"):
-            demo.tap("Q5 Home", "安卓发现桌面反复崩溃，让你重新选桌面：选 Q5 Home")
+        if demo.exists("Select a Home app") or demo.exists("q5home"):
+            demo.tap("q5home", "安卓发现桌面反复崩溃，让你重新选桌面：选 q5home")
             for label in ("Always", "始终", "总是"):
                 if demo.exists(label):
                     demo.tap(label, "选「始终」")
@@ -429,7 +437,7 @@ def main():
         demo.find("安全模式")
         time.sleep(1)
         demo.shot("safe-mode")
-        demo.tap("再试一次正常启动", "㉙ 点「再试一次正常启动」→ 回到正常桌面")
+        demo.tap("再试一次正常启动", "㉘ 点「再试一次正常启动」→ 回到正常桌面")
         demo.find("CarPlay")
         demo.shot("home-after-safe-mode")
         demo.caption("演示结束")

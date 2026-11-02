@@ -1,17 +1,39 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <!-- Full screen (status bar hidden) everywhere; dark only. -->
     <style name="Theme.Q5Home" parent="android:Theme.Material.NoActionBar">
         <item name="android:windowBackground">@android:color/black</item>
         <item name="android:colorBackground">@android:color/black</item>
         <item name="android:statusBarColor">@android:color/black</item>
         <item name="android:navigationBarColor">@android:color/black</item>
-        <item name="android:colorAccent">#FF8EF0B0</item>
-        <item name="android:windowAnimationStyle">@null</item>
+        <item name="android:windowFullscreen">true</item>
+        <item name="android:colorAccent">#FF6E7DFF</item>
+        <item name="android:windowAnimationStyle">@style/Anim.Q5Home</item>
         <item name="android:alertDialogTheme">@style/Dialog.Q5Home</item>
     </style>
 
+    <!--
+      Transitions between the launcher's own pages (fade + slight zoom, run by the system compositor so they stay smooth on
+      the slow head unit and hide the page build time). The task* animations are null so launching CarPlay / the OEM screen /
+      other apps stays instant.
+    -->
+    <style name="Anim.Q5Home" parent="@android:style/Animation.Activity">
+        <item name="android:activityOpenEnterAnimation">@anim/page_open_enter</item>
+        <item name="android:activityOpenExitAnimation">@anim/page_hold</item>
+        <item name="android:activityCloseEnterAnimation">@anim/page_hold</item>
+        <item name="android:activityCloseExitAnimation">@anim/page_close_exit</item>
+        <item name="android:taskOpenEnterAnimation">@null</item>
+        <item name="android:taskOpenExitAnimation">@null</item>
+        <item name="android:taskCloseEnterAnimation">@null</item>
+        <item name="android:taskCloseExitAnimation">@null</item>
+        <item name="android:taskToFrontEnterAnimation">@null</item>
+        <item name="android:taskToFrontExitAnimation">@null</item>
+        <item name="android:taskToBackEnterAnimation">@null</item>
+        <item name="android:taskToBackExitAnimation">@null</item>
+    </style>
+
     <style name="Dialog.Q5Home" parent="android:Theme.Material.Dialog.Alert">
-        <item name="android:colorAccent">#FF8EF0B0</item>
+        <item name="android:colorAccent">#FF6E7DFF</item>
     </style>
 
 </resources>

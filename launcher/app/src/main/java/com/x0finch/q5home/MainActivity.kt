@@ -31,6 +31,7 @@ import com.x0finch.q5home.ui.Glass
 import com.x0finch.q5home.ui.MenuItem
 import com.x0finch.q5home.ui.Menus
 import com.x0finch.q5home.ui.Overlay
+import com.x0finch.q5home.ui.RollingText
 import com.x0finch.q5home.ui.Ui
 import com.x0finch.q5home.ui.SunArcView
 import java.text.SimpleDateFormat
@@ -40,7 +41,7 @@ import java.util.Locale
 
 class MainActivity : Activity() {
 
-    private enum class Slot { CARPLAY, OEM, DOCK, ADD, APPS, SETTINGS }
+    private enum class Slot { CARPLAY, OEM, DOCK, ADD, APPS }
 
     private class Tile(
         val slot: Slot,
@@ -63,7 +64,12 @@ class MainActivity : Activity() {
     private lateinit var greeting: TextView
     private lateinit var date: TextView
     private lateinit var gpsLabel: TextView
-    private lateinit var speed: TextView
+    private lateinit var clock: RollingText
+    private lateinit var speed: RollingText
+    private lateinit var speedRow: View
+    private lateinit var gpsCard: View
+    /** No location permission yet: a tap on the GPS card opens the GPS settings page. */
+    private var gpsNeedsPermission = false
     private lateinit var speedUnit: TextView
     private lateinit var trip: TextView
     private lateinit var sunArc: SunArcView
@@ -90,7 +96,8 @@ class MainActivity : Activity() {
 
     private val timeReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
-            if (themeChanged()) return // Auto appearance: switch theme at the minute of sunrise / sunset
+            if (themeChanged()) return
+            updateClock(animate = true)
             updateGreeting()
             updateWallpaper()
         }
@@ -124,7 +131,16 @@ class MainActivity : Activity() {
         greeting = findViewById(R.id.greeting)
         date = findViewById(R.id.date)
         gpsLabel = findViewById(R.id.gpsLabel)
-        speed = findViewById(R.id.speed)
+        clock = RollingText(this).apply {
+            setTextSize(64f); setTypeface(resources.getFont(R.font.outfit_light)); setLetterSpacing(-0.04f)
+        }
+        findViewById<FrameLayout>(R.id.clockHolder).addView(clock)
+        speed = RollingText(this).apply {
+            setTextSize(40f); setTypeface(resources.getFont(R.font.outfit_light)); setLetterSpacing(-0.03f)
+        }
+        findViewById<FrameLayout>(R.id.speedHolder).addView(speed)
+        speedRow = findViewById(R.id.speedRow)
+        gpsCard = findViewById(R.id.gpsCard)
         speedUnit = findViewById(R.id.speedUnit)
         trip = findViewById(R.id.trip)
         carplayCard = findViewById(R.id.firstTile)
@@ -202,6 +218,7 @@ class MainActivity : Activity() {
         if (!started) return // Already redirected to safe mode; UI not initialized
         if (themeChanged()) return
         config.reload()?.let { toast("config.json 有误：$it") }
+        updateClock(animate = false)
         updateGreeting()
         updateWallpaper()
         updateBadge()
@@ -218,7 +235,7 @@ class MainActivity : Activity() {
         handler.removeCallbacks(tripTicker)
     }
 
-    /** Appearance settings changed, or in auto mode it became day / night: recreate the page with the new theme. */
+    /** The theme changed since this page was built: recreate it (dark only now, so this is a safety net). */
     private fun themeChanged(): Boolean {
         Ui.applyTheme(this)
         if (Ui.dark == createdDark) return false
@@ -226,19 +243,29 @@ class MainActivity : Activity() {
         return true
     }
 
-    /** GPS card: large speed text, heading / altitude; shows a hint when there is no fresh fix. The sunrise/sunset arc is also refreshed here. */
+    /**
+     * GPS card: large speed (rolls when it changes) and heading / altitude. Without a fresh fix the speed row collapses and a single
+     * status line remains (no big dash); without location permission the line invites a tap, which opens the GPS settings page.
+     * The sunrise/sunset arc is also refreshed here.
+     */
     private fun updateTrip() {
         val now = System.currentTimeMillis()
         val reading = if (config.homeGps) HomeGps.reading(gps.last, now) else null
-        val speedText = reading?.speedKmh?.toString() ?: "—"
-        if (speed.text != speedText) speed.text = speedText
+        val speedText = reading?.speedKmh?.toString()
+        speedRow.visibility = if (speedText != null) View.VISIBLE else View.GONE
+        if (speedText != null) speed.setText(speedText, animate = speed.text.isNotEmpty())
+        val needPermission = reading == null && config.homeGps && !gps.hasPermission()
         val detail = when {
             reading != null -> reading.detail.ifEmpty { "GPS 已定位" }
             !config.homeGps -> "首页 GPS 已关闭"
-            !gps.hasPermission() -> "没有定位权限（设置 → GPS 与 4G）"
-            else -> "等待 GPS 定位…"
+            needPermission -> "点一下开启定位"
+            else -> "正在等待 GPS 定位…"
         }
         if (trip.text != detail) trip.text = detail
+        trip.setTextColor(if (needPermission) Ui.ACCENT else Ui.TEXT_DIM)
+        trip.textSize = if (speedText == null) 15f else 13f
+        gpsNeedsPermission = needPermission
+        gpsCard.isFocusable = needPermission
         val loc = Sun.location(this)
         val times = loc?.let { Sun.times(it.first, it.second, now) }
         if (times != null) {
@@ -253,15 +280,28 @@ class MainActivity : Activity() {
         }
     }
 
-    /** Color the top-row cards and page background by theme (all colors come from Ui). */
+    /** Style the top-row cards and the page background (all colors come from Ui). */
     private fun styleDashboard() {
         root.setBackgroundColor(Ui.PAGE)
-        // Let the background wallpaper show through only faintly.
-        // The background is the wallpaper with just a slight scrim; cards are frosted glass (Glass).
-        scrim.setBackgroundColor(if (Ui.dark) 0x40000000 else 0x0D000000)
+        // The background is the wallpaper with just a slight scrim; cards are liquid glass (Glass).
+        scrim.setBackgroundColor(0x40000000)
         credit.setTextColor(Ui.TEXT_FAINT)
+        // Launcher settings: only an icon in the clock card's top-right corner (no background); it fades while pressed and gets an
+        // accent ring only when selected with the knob.
+        findViewById<ImageView>(R.id.deskSettings).apply {
+            background = null
+            imageTintList = android.content.res.ColorStateList(
+                arrayOf(intArrayOf(android.R.attr.state_pressed), intArrayOf()),
+                intArrayOf(Ui.TEXT_FAINT, Ui.TEXT_DIM))
+            foreground = StateListDrawable().apply {
+                addState(intArrayOf(android.R.attr.state_focused), GradientDrawable().apply {
+                    shape = GradientDrawable.OVAL
+                    setStroke(dp(2), Ui.ACCENT)
+                })
+            }
+            setOnClickListener { startActivity(Intent(this@MainActivity, SettingsActivity::class.java)) }
+        }
         val clockCard = findViewById<View>(R.id.clockCard)
-        val gpsCard = findViewById<View>(R.id.gpsCard)
         clockCard.background = Ui.bento(this, 26, BentoDrawable.Style.LIFTED)
         gpsCard.background = Ui.bento(this, 26, BentoDrawable.Style.LIFTED)
         carplayCard.background = StateListDrawable().apply {
@@ -271,18 +311,22 @@ class MainActivity : Activity() {
         carplayCard.foreground = Ui.focusRing(this, 26)
         Ui.allowShadows(findViewById(R.id.grid), findViewById(R.id.topRow), tileScroll, tiles)
         Glass.followScroll(tileScroll)
-        for (v in listOf<TextView>(greeting, gpsLabel, findViewById(R.id.carplayLabel))) {
-            v.setTextColor(Ui.TEXT_DIM)
-            v.setCompoundDrawablesRelative(dot(), null, null, null)
-            v.compoundDrawablePadding = dp(8)
-        }
-        findViewById<TextView>(R.id.clock).setTextColor(Ui.TEXT)
+        // Card labels: normal case, no decorative dots.
+        greeting.setTextColor(Ui.TEXT_DIM)
+        gpsLabel.setTextColor(Ui.TEXT_DIM)
+        clock.color = Ui.TEXT
         date.setTextColor(Ui.TEXT_DIM)
-        speed.setTextColor(Ui.TEXT)
+        speed.color = Ui.TEXT
+        gpsCard.foreground = Ui.focusRing(this, 26)
+        // Knob selects the GPS card (only focusable without location permission) and presses OK: open the GPS settings page.
+        gpsCard.setOnKeyListener { _, keyCode, event ->
+            val ok = keyCode == android.view.KeyEvent.KEYCODE_DPAD_CENTER || keyCode == android.view.KeyEvent.KEYCODE_ENTER
+            if (ok && event.action == android.view.KeyEvent.ACTION_UP && gpsNeedsPermission) openGpsSettings()
+            ok && gpsNeedsPermission
+        }
         speedUnit.setTextColor(Ui.TEXT_DIM)
         trip.setTextColor(Ui.TEXT_DIM)
-        gpsLabel.text = "行车 · GPS"
-        findViewById<TextView>(R.id.carplayLabel).text = "CarPlay"
+        gpsLabel.text = "行车"
         findViewById<TextView>(R.id.carplayTitle).setTextColor(Ui.TEXT)
         carplaySub.setTextColor(Ui.TEXT_DIM)
         // Cover: rounded-corner clipping (outline clipping under hardware acceleration; Android 8.1 supports rounded rects).
@@ -307,19 +351,19 @@ class MainActivity : Activity() {
         pressAnimation(carplayCard, 1.02f)
     }
 
-    /** Wallpaper changed / page size changed: recompute the blurred background used by the frosted glass and redraw the cards. */
+    /** Wallpaper / page size changed: recompute the glass background before the next frame (no solid-card flash) and redraw the cards. */
     private fun refreshGlass(bitmap: android.graphics.Bitmap?, key: String?) {
-        wallpaperView.post {
-            Glass.update(wallpaperView, bitmap, key)
-            Glass.invalidateTree(root)
-        }
+        Glass.updateBeforeDraw(wallpaperView, bitmap, key, root)
     }
 
-    /** Small dot before a card label (accent color). */
-    private fun dot(): Drawable = GradientDrawable().apply {
-        shape = GradientDrawable.OVAL
-        setColor(Ui.ACCENT)
-        setBounds(0, 0, dp(6), dp(6))
+    /** Clock: the digits that changed roll up when the minute changes (replaced directly when the page is shown). */
+    private fun updateClock(animate: Boolean) {
+        clock.setText(SimpleDateFormat("HH:mm", Locale.CHINA).format(Date()), animate)
+    }
+
+    private fun openGpsSettings() {
+        startActivity(Intent(this, SettingsActivity::class.java)
+            .putExtra(SettingsActivity.EXTRA_SECTION, SettingsActivity.SECTION_SIGNAL))
     }
 
     private fun carplayTile(): Tile {
@@ -339,7 +383,7 @@ class MainActivity : Activity() {
         carplayCard.contentDescription = "CarPlay"
     }
 
-    /** Shrink slightly when pressed, grow slightly when selected (knob). */
+    /** Shrink slightly when pressed and spring back a little on release; grow slightly when selected (knob). */
     @SuppressLint("ClickableViewAccessibility")
     private fun pressAnimation(v: View, focusScale: Float) {
         v.setOnFocusChangeListener { view, focused ->
@@ -349,10 +393,12 @@ class MainActivity : Activity() {
         }
         v.setOnTouchListener { view, event ->
             when (event.actionMasked) {
-                MotionEvent.ACTION_DOWN -> view.animate().scaleX(0.97f).scaleY(0.97f).setDuration(90).start()
+                MotionEvent.ACTION_DOWN -> view.animate().scaleX(0.96f).scaleY(0.96f).setDuration(90)
+                    .setInterpolator(android.view.animation.DecelerateInterpolator()).start()
                 MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                     val s = if (view.isFocused) focusScale else 1f
-                    view.animate().scaleX(s).scaleY(s).setDuration(120).start()
+                    view.animate().scaleX(s).scaleY(s).setDuration(220)
+                        .setInterpolator(android.view.animation.OvershootInterpolator(2.2f)).start()
                 }
             }
             false
@@ -453,21 +499,20 @@ class MainActivity : Activity() {
         config.dock.forEachIndexed { i, item ->
             val icon = Icons.byKey(item.icon)
             val label = Targets.label(this, item.target)
-            // When the icon matches the app (e.g. a gear for Settings), use the unified Chinese name; when swapped for an unrelated icon, the name still follows the app,
-            // so a tile with a "导航" (Navigation) icon doesn't actually open Settings.
+            // When the icon matches the app (e.g. a gear for Settings), use the unified Chinese name; when swapped for an unrelated icon,
+            // the name still follows the app, so a tile with a "导航" (Navigation) icon doesn't actually open Settings.
             val iconFits = icon != null && Icons.guess(Targets.packageOf(item.target), label) == icon.key
-            val title = (if (iconFits) icon?.name else label) ?: icon?.name ?: item.target.substringBefore('/')
-            val sub = when {
-                !Targets.isAvailable(this, item.target) -> "未安装 · 长按更换"
-                iconFits && label != null && label != icon?.name -> label
-                else -> ""
-            }
+            // Common apps with English system labels (e.g. "Settings") get the unified Chinese name ("系统设置"); Chinese labels stay as is.
+            val chinese = label?.takeUnless { l -> l.any { it.code in 0x4E00..0x9FFF } }
+                ?.let { Icons.byKey(Icons.guess(Targets.packageOf(item.target), it))?.name }
+            val title = (if (iconFits) icon?.name else chinese ?: label) ?: icon?.name ?: item.target.substringBefore('/')
+            // A second line only when it helps (not installed); no "文件 / Files" style repetition.
+            val sub = if (!Targets.isAvailable(this, item.target)) "未安装 · 长按更换" else ""
             list += Tile(Slot.DOCK, i, item.target, icon, title, sub, wide = false)
         }
+        list += Tile(Slot.APPS, 0, null, Icons.byKey("apps"), getString(R.string.all_apps), "", wide = false)
+        // "添加" (Add) is always last. Launcher settings is the small icon in the clock card, not an app tile.
         list += Tile(Slot.ADD, 0, null, null, getString(R.string.add), "", wide = false)
-        // The two fixed tiles: All apps and Launcher settings (formerly the two buttons in the top-right corner).
-        list += Tile(Slot.APPS, 0, null, Icons.byKey("apps"), getString(R.string.all_apps), "已安装的应用", wide = false)
-        list += Tile(Slot.SETTINGS, 0, null, DESK_ICON, getString(R.string.settings), "外观 · 壁纸 · 摸底", wide = false)
         return list
     }
 
@@ -477,29 +522,38 @@ class MainActivity : Activity() {
         tiles.removeAllViews()
         val gap = dp(16)
         val list = buildTiles()
-        // With few cards they fill exactly one row (Bento grid); with more, lay out by minimum width and scroll horizontally.
-        val fit = (tileScroll.width - gap * (list.size - 1)) / list.size
-        tileWidth = fit.coerceIn((tileHeight * 0.72f).toInt(), (tileHeight * 1.4f).toInt())
+        // App tiles are square (width = height, which follows the screen); more tiles scroll horizontally.
+        tileWidth = tileHeight
         list.forEachIndexed { i, tile ->
-            val lp = LinearLayout.LayoutParams(tileWidth, tileHeight)
+            // "添加" (Add) is not an app: a narrow dashed tile at the end that doesn't compete with the apps.
+            val w = if (tile.slot == Slot.ADD) (tileHeight * 0.42f).toInt().coerceAtLeast(dp(64)) else tileWidth
+            val lp = LinearLayout.LayoutParams(w, tileHeight)
             if (i > 0) lp.marginStart = gap
             tiles.addView(makeTileView(tile), lp)
         }
     }
 
-    /** Tile icon: prefer the drawn unified icon, otherwise use the app's own icon. */
+    /** Tile icon: the unified icon (a white glyph, no colored square) first, otherwise the app's own icon. */
     private fun iconFor(tile: Tile): Drawable? =
-        tile.icon?.let { Icons.badge(this, it) } ?: Targets.icon(this, tile.spec)
+        tile.icon?.let { Icons.glyph(this, it, Ui.TEXT) } ?: Targets.icon(this, tile.spec)
 
     private fun makeTileView(tile: Tile): View {
-        val fixed = tile.slot == Slot.APPS || tile.slot == Slot.SETTINGS
+        val fixed = tile.slot == Slot.APPS
         val available = tile.slot == Slot.ADD || fixed || Targets.isAvailable(this, tile.spec)
         val icon = if (tile.slot == Slot.ADD) null else iconFor(tile)
 
         val card = FrameLayout(this)
         card.background = when {
-            // Plus tile: a flush frosted card (not raised, not eye-catching). Apps that aren't installed still show, with faded content.
-            tile.slot == Slot.ADD -> Ui.bento(this, 22, BentoDrawable.Style.RESTING)
+            // Plus tile: no glass, just a dashed outline over a very faint dark fill (readable on busy wallpapers).
+            // Apps that aren't installed still show, with faded content.
+            tile.slot == Slot.ADD -> StateListDrawable().apply {
+                addState(intArrayOf(android.R.attr.state_pressed), Ui.rounded(this@MainActivity, Ui.PRESSED, 22))
+                addState(intArrayOf(), GradientDrawable().apply {
+                    cornerRadius = dp(22).toFloat()
+                    setColor(0x2E000000)
+                    setStroke(dp(1).coerceAtLeast(2), Ui.TEXT_DIM, dp(6).toFloat(), dp(5).toFloat())
+                })
+            }
             // Bento card: raised normally, flush when pressed (as if pushed in).
             else -> StateListDrawable().apply {
                 addState(intArrayOf(android.R.attr.state_pressed), Ui.bento(this@MainActivity, 22, BentoDrawable.Style.RESTING))
@@ -513,15 +567,18 @@ class MainActivity : Activity() {
         val pad = dp(18)
 
         if (tile.slot == Slot.ADD) {
-            card.addView(Ui.text(this, "+", 1f, Ui.TEXT_DIM, Ui.Font.LIGHT).apply {
-                setTextSize(TypedValue.COMPLEX_UNIT_PX, tileHeight * 0.3f)
-                gravity = Gravity.CENTER
-            }, FrameLayout.LayoutParams(-1, -1))
-            card.addView(Ui.text(this, tile.title, 13f, Ui.TEXT_DIM).apply { gravity = Gravity.CENTER },
-                FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM).apply { bottomMargin = pad })
+            val column = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                gravity = Gravity.CENTER_HORIZONTAL
+            }
+            column.addView(Ui.glyph(this, R.drawable.ui_add, 28, Ui.TEXT), LinearLayout.LayoutParams(dp(28), dp(28)))
+            column.addView(Ui.text(this, tile.title, 13f, Ui.TEXT).apply { gravity = Gravity.CENTER },
+                LinearLayout.LayoutParams(-2, -2).apply { topMargin = dp(8) })
+            card.addView(column, FrameLayout.LayoutParams(-2, -2, Gravity.CENTER))
         } else {
             if (icon != null) {
-                val size = (tileHeight * 0.3f).toInt().coerceIn(dp(36), dp(56))
+                // Every app tile's icon is the same size and position: unified white glyphs and apps' own icons alike.
+                val size = (tileHeight * 0.2f).toInt().coerceIn(dp(28), dp(36))
                 card.addView(ImageView(this).apply {
                     setImageDrawable(icon)
                     if (!available) alpha = 0.4f
@@ -555,7 +612,22 @@ class MainActivity : Activity() {
     private fun forwardSwipesToTiles() {
         val rootPos = IntArray(2)
         val scrollPos = IntArray(2)
+        val cardPos = IntArray(2)
+        var downX = 0f
+        var downY = 0f
+        val slop = android.view.ViewConfiguration.get(this).scaledTouchSlop
         root.setOnTouchListener { _, event ->
+            // A tap (no drag) on the GPS card without location permission opens the GPS settings page. The card itself stays
+            // non-clickable so swipes on it still scroll the tiles.
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN -> { downX = event.rawX; downY = event.rawY }
+                MotionEvent.ACTION_UP -> if (gpsNeedsPermission &&
+                    Math.abs(event.rawX - downX) < slop && Math.abs(event.rawY - downY) < slop) {
+                    gpsCard.getLocationOnScreen(cardPos)
+                    if (event.rawX >= cardPos[0] && event.rawX < cardPos[0] + gpsCard.width &&
+                        event.rawY >= cardPos[1] && event.rawY < cardPos[1] + gpsCard.height) openGpsSettings()
+                }
+            }
             root.getLocationInWindow(rootPos)
             tileScroll.getLocationInWindow(scrollPos)
             val forwarded = MotionEvent.obtain(event)
@@ -583,7 +655,6 @@ class MainActivity : Activity() {
         when {
             tile.slot == Slot.ADD -> pick(REQ_ADD)
             tile.slot == Slot.APPS -> startActivity(Intent(this, LibraryActivity::class.java))
-            tile.slot == Slot.SETTINGS -> startActivity(Intent(this, SettingsActivity::class.java))
             !available -> pick(requestCodeFor(tile))
             !Targets.launch(this, tile.spec) -> toast("无法打开：${tile.spec}")
         }
@@ -591,7 +662,7 @@ class MainActivity : Activity() {
 
     private fun onTileLongClick(tile: Tile, view: View) {
         if (tile.slot == Slot.ADD) { pick(REQ_ADD); return }
-        if (tile.slot == Slot.APPS || tile.slot == Slot.SETTINGS) { onTileClick(tile, true); return }
+        if (tile.slot == Slot.APPS) { onTileClick(tile, true); return }
         val items = mutableListOf(MenuItem("更换应用", R.drawable.ui_swap) { pick(requestCodeFor(tile)) })
         if (tile.slot == Slot.DOCK) {
             items += MenuItem("更换图标", R.drawable.ui_palette) { pickIcon(tile) }
@@ -621,7 +692,7 @@ class MainActivity : Activity() {
         Slot.CARPLAY -> REQ_CARPLAY
         Slot.OEM -> REQ_OEM
         Slot.DOCK -> REQ_REPLACE_BASE + tile.index
-        Slot.ADD, Slot.APPS, Slot.SETTINGS -> REQ_ADD
+        Slot.ADD, Slot.APPS -> REQ_ADD
     }
 
     private fun pick(requestCode: Int) {
@@ -671,8 +742,5 @@ class MainActivity : Activity() {
         private const val REQ_OEM = 2
         private const val REQ_ADD = 3
         private const val REQ_REPLACE_BASE = 100
-
-        /** Icon for the "桌面设置" (Launcher settings) card (adjustment sliders, to set it apart from the system Settings gear). */
-        private val DESK_ICON = Icons.Icon("desk", "桌面设置", R.drawable.ui_tune, 0xFF7D8BFF.toInt(), 0xFF2F48F5.toInt())
     }
 }

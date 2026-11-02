@@ -93,29 +93,53 @@ Add package names here as they are identified:
     no download when free space < 300 MB. Do not loosen these limits when making changes unless the user agrees. The manifest is `wallpapers/feed.json` at the repository root.
     The manifest is appended once a week (Sundays) by the `wallpapers.yml` workflow + `wallpapers/update_feed.py` (Secret `UNSPLASH_ACCESS_KEY`, at most 60 entries).
     The auto-rotation key is still `daily` (backward compatible); the interval is stored in `wallpaper_interval_min` (minutes, default 1440).
-  - UI style: minimal **Bento cards** (`ui/BentoDrawable.kt`): layered shadows + 1px border + inner glow at the top;
-    two styles: `LIFTED` (large shadow offset downward: home tiles, popup cards, buttons at rest) and `RESTING` (slightly darker border, brighter fill: settings groups, pressed state).
-    Shadows are drawn at 1/4 size as cached ALPHA_8 bitmaps (Android 8.1 hardware acceleration does not support blurred shape shadows); parent layouts need `Ui.allowShadows` to turn off clipping.
-    Frosted glass (`ui/Glass.kt`): the page background is the wallpaper, card fills are translucent, and a blurred copy of the wallpaper is drawn behind them (Android 8.1 has no system blur:
-    downscale to 1/10 and run a software box blur three times, recomputed only when the wallpaper changes); scroll containers need `Glass.followScroll`, otherwise the blurred background is misaligned.
-    Appearance `appearance`: auto (light during the day, dark after sunset, via `Sun`) / light / dark; take all colors from the theme colors in `Ui`, never hardcode colors again.
-  - UI components are in `ui/` (`Ui` style and theme colors, `Overlay` popup layer, `Menus` menus/confirmations/icon grid, `Toggle` switch);
-    settings is the full-page `SettingsActivity`. Do not use system AlertDialog / Toast anymore.
+  - UI style: **dark liquid-glass Bento cards** (`ui/BentoDrawable.kt` + `ui/Glass.kt`, modelled on iOS 26 Liquid Glass). Cards keep
+    layered shadows (drawn at 1/4 size as cached ALPHA_8 bitmaps, because Android 8.1 hardware acceleration has no blurred shape
+    shadows; parent layouts need `Ui.allowShadows` to turn off clipping). The page background is the wallpaper; behind each card
+    `Glass` draws a lightly softened, more saturated copy of it (no system blur on 8.1: downscale to 1/6, two software box-blur
+    passes, recomputed only when the wallpaper changes, computed before the first frame via `Glass.updateBeforeDraw`).
+    `BentoDrawable.drawGlass` adds the rest: the rim is magnified more than the middle (lens refraction), a diagonal edge highlight
+    plus a thin inner line (thickness), a very transparent tint that darkens over bright backgrounds (`Glass.luma`), and a soft glow
+    under the finger while pressed (`setHotspot`). Scroll containers need `Glass.followScroll`, otherwise the glass is misaligned.
+    **Dark only** (the owner's choice; `Ui.resolveDark` always returns true); the `appearance` setting is still read and written
+    but no longer applied. Take all colors from `Ui`, never hardcode them.
+    All pages are full screen (theme `windowFullscreen`, status bar hidden).
+    Animations (to hide jank on the slow head unit): the launcher's own pages fade in growing slightly / fade out shrinking
+    (`Anim.Q5Home`, run by the system compositor); launching CarPlay, the OEM screen or other apps has no animation
+    (task* animations are @null).
+  - UI components are in `ui/` (`Ui` style and colors, `Overlay` popup layer, `Menus` menus/confirmations/icon grid, `Toggle` switch,
+    `RollingText` rolling digits). Settings is the full-page `SettingsActivity`: a floating glass navigation column on the left and
+    liquid-glass cards on the right (`tile`: icon / title / big value / description / bottom button, toggles top-right with the whole
+    tile clickable; `tilesRow` equal-height rows; `grid`; `card` for lists, QR codes and the thumbnail strip, its content clipped to
+    the rounded card with `roundClip`). No back button: swipe right from the left edge (`dispatchTouchEvent`) or press HOME.
+    Switching sections cross-fades (`switchSection`: fade out, rebuild while invisible, fade in moving up). Wallpaper thumbnails are
+    cached (`thumbBitmap`); don't decode them again on every refresh. Do not use system AlertDialog / Toast.
   - Tests: `./gradlew :app:testDebugUnitTest` (Robolectric, including screenshot output to `app/build/screenshots`).
   - `fakeapps/` holds the fake ZLINK / original car apps used for CI recordings; never install them on the head unit (same package name as the real ZLINK).
   - In-app updates: `Updates.kt` (GitHub Release check / download / verify / PackageInstaller install), `UpdateJob.kt` (daily check).
-    Version number = commit count (`app/build.gradle`); pushing to main publishes a Release automatically (`release` job in the workflow).
+    Version sequence = `version-base` + commit count (`app/build.gradle`); pushing to main publishes a Release automatically
+    (`release` job; only the newest app change on main is released, wallpaper-feed commits don't count).
   - Head unit recon (no adb): `Recon.kt` (read-only collection), `ReconUpload.kt` (submits a GitHub Issue; the token is stored only in the head unit's private storage),
-    `LocalShare.kt` (temporary web page opened by scanning a QR code with a phone; path contains a random string, closes after 15 minutes), `QrCode.kt` (hand-written QR code, tests check fixed hashes).
+    `LocalShare.kt` (temporary web page opened by scanning a QR code with a phone: the focused report is at the top, ready to copy and
+    send, and submitting it as an Issue with a token is optional; path contains a random string, closes after 15 minutes), `QrCode.kt` (hand-written QR code, tests check fixed hashes).
     `ApkStrings.kt` (reads string constants from vendor APKs), `DexScan.kt` (read-only disassembly: lists the call order in methods that use original-car-related strings;
     tests use `test/resources/oem-switch.dex`, built from `oem-switch.java.txt` in the same directory with javac + d8).
     Submit ("提交") defaults to a **focused report**: analysis targets come from `config/recon-targets.json` in the repository (downloaded when the head unit submits; the same copy is built into `ReconTargets.kt`,
     and tests check that the two match). **To change the analysis focus, edit only this file; no release needed**. It may only decide what to read; never add the ability to write to or switch anything on the head unit.
     Only Full report ("完整报告") lists all apps, system properties, etc.
     The recon page must stay read-only; never add any operation that changes the head unit's state (disabling, changing settings, etc.). Read recon Issues submitted by the user with GitHub tools.
-  - Home screen = **Bento dashboard** (`activity_main.xml`): top row clock card | GPS card (big speed + `ui/SunArcView` sunrise/sunset arc) |
-    big CarPlay card (id `firstTile`, the square on its left is the current wallpaper); bottom row app cards (original car, favorite apps, add, all apps, desktop settings).
-    With few cards they fill one row; with more they scroll horizontally. The wallpaper is shown in full only inside the CarPlay card, with the page background faintly showing it. The clock / GPS cards are not clickable; swiping on them scrolls the bottom row.
+  - Home screen = **Bento dashboard** (`activity_main.xml`): top row clock card | GPS card (big speed + `ui/SunArcView`
+    sunrise/sunset arc) | big CarPlay card (id `firstTile`, the square on its left is the current wallpaper, no label above its title);
+    bottom row square app tiles (width = height: OEM, favorite apps, all apps), then a narrow dashed "添加" (Add) tile, always last.
+    Launcher settings is the small icon in the clock card's top-right corner (id `deskSettings`, icon only, no background, an accent
+    ring only when selected with the knob; it never takes an app tile). Common apps with English labels (e.g. Settings) show the
+    unified Chinese name. More tiles scroll horizontally; swiping on the clock / GPS cards scrolls them too.
+    **Design rules** (from the stageshow Bento rules): icons are white filled glyphs placed directly on the glass (`Icons.glyph`, no
+    colored squares); apps' own icons keep their look but have the same size and position. Say each thing once (no "Files"-style
+    duplicate subtitles; only the OEM hint and "not installed" lines). Labels in normal case, no decorative dots. Only the clock is
+    the biggest number. Without a GPS fix the speed row collapses to one status line; without location permission a tap on the GPS
+    card opens "GPS 与 4G" (handled in `forwardSwipesToTiles`; the card itself stays non-clickable so swipes still scroll).
+    Clock and speed use `ui/RollingText`: changed digits roll instead of being swapped. Cards shrink when pressed and spring back.
   - Home GPS: `HomeGps.kt` (speed / heading / altitude, listens only while the home screen is shown); sunrise/sunset: `Sun.kt` (local formula, position stored only to 0.1°).
     In `wallpaper_sun` mode, wallpapers are split into day / night by `Wallpapers.isNight` (hardcoded for built-ins, judged by brightness for online ones).
   - Default launcher: `HomeRole.kt` (requests the HOME role via RoleManager; restore goes through the system Home app settings). The stock launcher is never disabled.

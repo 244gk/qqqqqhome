@@ -29,7 +29,7 @@ class SafeModeActivity : Activity() {
         }
         val version = runCatching { packageManager.getPackageInfo(packageName, 0).versionName }.getOrNull() ?: ""
         column.addView(text("安全模式", 30f, Color.WHITE))
-        column.addView(text("Q5 Home $version 刚才连续崩溃了 ${CrashGuard.LIMIT} 次，所以先用这个简单页面。" +
+        column.addView(text("q5home $version 刚才连续崩溃了 ${CrashGuard.LIMIT} 次，所以先用这个简单页面。" +
             "可以直接打开 CarPlay 或原车，或者安装修复 / 回退版本。", 16f, 0xB3FFFFFF.toInt()).apply {
             setPadding(0, dp(8), 0, dp(20))
         })
@@ -88,7 +88,7 @@ class SafeModeActivity : Activity() {
 
     private fun checkAndInstall() {
         if (!packageManager.canRequestPackageInstalls()) {
-            status.text = "需要先在系统设置里允许 Q5 Home「安装未知应用」，或用电脑执行 README 里的 adb 命令。"
+            status.text = "需要先在系统设置里允许 q5home「安装未知应用」，或用电脑执行 README 里的 adb 命令。"
             return
         }
         status.text = "正在检查 GitHub…"

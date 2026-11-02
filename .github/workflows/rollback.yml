@@ -85,7 +85,7 @@ jobs:
         with:
           tag_name: v${{ steps.v.outputs.name }}
           target_commitish: ${{ steps.v.outputs.sha }}
-          name: Q5 Home ${{ steps.v.outputs.name }}（回退到 ${{ steps.v.outputs.tag }}）
+          name: q5home ${{ steps.v.outputs.name }}（回退到 ${{ steps.v.outputs.tag }}）
           body_path: notes.md
           files: |
             q5home-${{ steps.v.outputs.name }}.apk

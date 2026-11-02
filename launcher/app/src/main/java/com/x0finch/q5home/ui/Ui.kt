@@ -23,8 +23,8 @@ import com.x0finch.q5home.Sun
 import com.x0finch.q5home.Wallpapers
 
 /**
- * The launcher's unified UI style (no system dialogs): minimal Bento cards (see [BentoDrawable]), rounded corners, the Outfit font, a blue accent color.
- * Light by day, dark at night (switches automatically at sunrise/sunset, or can be fixed; see [Config.appearance]) — an all-white screen is too glaring in the car at night.
+ * The launcher's unified UI style (no system dialogs): dark liquid-glass Bento cards (see [BentoDrawable] / [Glass]), rounded corners,
+ * the Outfit font, a blue accent color. Dark only (the owner's choice); [Config.appearance] is still read and written but no longer applied.
  * For in-car use: rows at least 56dp tall, larger text; an accent-color outline when focused via rotary knob / D-pad.
  */
 object Ui {
@@ -32,13 +32,9 @@ object Ui {
     @Volatile var dark = true
         private set
 
-    /** Works out from settings whether to use dark or light (auto = dark after sunset). */
-    fun resolveDark(context: Context, appearance: String = Config(context).also { it.reload() }.appearance): Boolean =
-        when (appearance) {
-            Config.APPEARANCE_LIGHT -> false
-            Config.APPEARANCE_DARK -> true
-            else -> !Sun.isDaylight(context)
-        }
+    /** Always dark: the liquid-glass design only has a dark version. [appearance] is kept for backward compatibility. */
+    @Suppress("UNUSED_PARAMETER")
+    fun resolveDark(context: Context, appearance: String? = null): Boolean = true
 
     /** Sets the theme for the current screen; returns whether it changed (the home screen recreates itself based on this). */
     fun applyTheme(context: Context, appearance: String? = null): Boolean {
@@ -79,21 +75,6 @@ object Ui {
         } else {
             val base = fill ?: if (resting) 0xFFFBFAF8.toInt() else 0xFFF4F3F0.toInt()
             CardColors(lighten(base, 0.6f), base, if (resting) 0x24000000 else 0x14000000, 0xE6FFFFFF.toInt())
-        }
-    }
-
-    /**
-     * Frosted-glass card colors: translucent fill (blurred wallpaper behind), thin white edge (glass edge highlight), brighter top inner glow.
-     * RESTING is a bit more opaque (pressed state / groups look more "solid").
-     */
-    fun glassColors(dark: Boolean, style: BentoDrawable.Style): CardColors {
-        val resting = style == BentoDrawable.Style.RESTING
-        return if (dark) {
-            if (resting) CardColors(0x992C2C31.toInt(), 0x8C202024.toInt(), 0x2EFFFFFF, 0x3DFFFFFF)
-            else CardColors(0x80292A2E.toInt(), 0x6B1A1A1D, 0x24FFFFFF, 0x38FFFFFF)
-        } else {
-            if (resting) CardColors(0xE0FFFFFF.toInt(), 0xCCFBFAF8.toInt(), 0xB3FFFFFF.toInt(), 0xFFFFFFFF.toInt())
-            else CardColors(0xCCFFFFFF.toInt(), 0xA8F6F5F2.toInt(), 0x99FFFFFF.toInt(), 0xFFFFFFFF.toInt())
         }
     }
 
@@ -226,7 +207,8 @@ object Ui {
     fun allowShadows(vararg views: ViewGroup) = views.forEach { it.clipChildren = false; it.clipToPadding = false }
 
     /**
-     * Full-page background for settings, the app list, etc.: the current wallpaper + a heavy scrim (off-white in light, black in dark), consistent with the home screen without competing with content.
+     * Full-page background for settings, the app list, etc.: the current wallpaper + a dark wash, consistent with the home screen
+     * without competing with the content.
      * Returns the container for the content.
      */
     fun pageRoot(activity: Activity): FrameLayout {
@@ -248,9 +230,7 @@ object Ui {
             daylight = if (config.wallpaperSun) Sun.isDaylight(activity) else null)
         val bmp = wallpaper?.let { Wallpapers.decode(activity, it, activity.resources.displayMetrics.widthPixels / 2) }
         image.setImageBitmap(bmp)
-        image.post {
-            Glass.update(image, bmp, wallpaper?.key + "/half")
-            Glass.invalidateTree(root)
-        }
+        // Compute the glass background before the first frame, so the page never flashes solid cards first.
+        Glass.updateBeforeDraw(image, bmp, wallpaper?.key + "/half", root)
     }
 }

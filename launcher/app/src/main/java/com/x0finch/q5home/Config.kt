@@ -183,7 +183,7 @@ class Config(private val context: Context) {
     companion object {
         const val FILE = "config.json"
         const val CURRENT_FILE = "current.json"
-        private const val DEFAULT_TITLE = "AUDI Q5"
+        private const val DEFAULT_TITLE = "Audi Q5"
         private const val KEY_CARPLAY = "carplay"
         private const val KEY_OEM = "oem"
         private const val KEY_DOCK = "dock_v2"

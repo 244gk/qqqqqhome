@@ -72,7 +72,7 @@ object Menus {
         card.addView(Ui.text(context, "只换图标，打开的应用不变", 13f, Ui.TEXT_DIM),
             LinearLayout.LayoutParams(-2, -2).apply { topMargin = Ui.dp(context, 6); bottomMargin = Ui.dp(context, 12) })
 
-        val cells = Icons.ALL.map { Triple(it.key as String?, it.name, Icons.badge(context, it) as Drawable?) } +
+        val cells = Icons.ALL.map { Triple(it.key as String?, it.name, android.graphics.drawable.InsetDrawable(Icons.glyph(context, it, Ui.TEXT), Ui.dp(context, 12)) as Drawable?) } +
             Triple(null, "应用自带", appIcon)
         val perRow = 7
         cells.chunked(perRow).forEach { rowCells ->

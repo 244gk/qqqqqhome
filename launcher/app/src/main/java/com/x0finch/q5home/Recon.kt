@@ -77,7 +77,7 @@ object Recon {
         val version = runCatching { pm.getPackageInfo(context.packageName, 0).versionName }.getOrNull() ?: "?"
 
         md.appendLine("<!-- q5home-recon v1 -->")
-        md.appendLine("由 Q5 Home $version 在车上生成（$now），只读，没有改动车机。")
+        md.appendLine("由 q5home $version 在车上生成（$now），只读，没有改动车机。")
         md.appendLine()
 
         // ---- System ----
@@ -280,7 +280,7 @@ object Recon {
         val self = info(context.packageName)?.versionName ?: "?"
 
         md.appendLine("<!-- q5home-recon focused v1 -->")
-        md.appendLine("由 Q5 Home $self 在车上生成（$now），**重点报告**，只读，没有改动车机。分析目标：${targets.source}。")
+        md.appendLine("由 q5home $self 在车上生成（$now），**重点报告**，只读，没有改动车机。分析目标：${targets.source}。")
         md.appendLine()
 
         md.appendLine("## 版本")

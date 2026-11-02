@@ -147,7 +147,7 @@ Fields are documented in [launcher/config.example.json](launcher/config.example.
 On **Wi-Fi (unmetered networks)**, a background job downloads up to 2 new wallpapers a day and adds them to the automatic rotation.
 
 - **Source**: by default reads the manifest in this repository, [wallpapers/feed.json](wallpapers/feed.json); the head unit downloads new entries the next time it is on Wi-Fi, no APK reinstall needed.
-  **Automatic manifest updates**: the `wallpapers` workflow ([.github/workflows/wallpapers.yml](.github/workflows/wallpapers.yml)) picks 3 new landscape photos from Unsplash every day
+  **Automatic manifest updates**: the `wallpapers` workflow ([.github/workflows/wallpapers.yml](.github/workflows/wallpapers.yml)) picks 3 new landscape photos from Unsplash once a week (Sundays)
   (rotating themes such as night scenes, mountains, cities, roads), appends them to the manifest with photographer credits, and keeps at most 60 entries.
   One-time setup: create an app at [unsplash.com/developers](https://unsplash.com/developers) to get an Access Key,
   and add `UNSPLASH_ACCESS_KEY` under the repository's Settings → Secrets and variables → Actions; if not set, the job is skipped.

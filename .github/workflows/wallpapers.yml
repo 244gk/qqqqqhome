@@ -5,7 +5,7 @@ name: wallpapers
 # Only changes feed.json, so it does not trigger the launcher workflow or publish a new release.
 on:
   schedule:
-    - cron: '47 19 * * *' # once a day (19:47 UTC)
+    - cron: '47 19 * * 0' # once a week (Sundays 19:47 UTC)
   workflow_dispatch:
     inputs:
       count:

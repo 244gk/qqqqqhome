@@ -91,7 +91,7 @@ Add package names here as they are identified:
   - Wallpapers are in `res/drawable-nodpi/wall_*.webp`, sources recorded in `CREDITS.md`; update it when adding wallpapers.
   - Online wallpapers: `OnlineWallpapers.kt` + `WallpaperJob.kt` (Wi-Fi only, once a day); storage limit 8 images / 6 MB,
     no download when free space < 300 MB. Do not loosen these limits when making changes unless the user agrees. The manifest is `wallpapers/feed.json` at the repository root.
-    The manifest is appended daily by the `wallpapers.yml` workflow + `wallpapers/update_feed.py` (Secret `UNSPLASH_ACCESS_KEY`, at most 60 entries).
+    The manifest is appended once a week (Sundays) by the `wallpapers.yml` workflow + `wallpapers/update_feed.py` (Secret `UNSPLASH_ACCESS_KEY`, at most 60 entries).
     The auto-rotation key is still `daily` (backward compatible); the interval is stored in `wallpaper_interval_min` (minutes, default 1440).
   - UI style: minimal **Bento cards** (`ui/BentoDrawable.kt`): layered shadows + 1px border + inner glow at the top;
     two styles: `LIFTED` (large shadow offset downward: home tiles, popup cards, buttons at rest) and `RESTING` (slightly darker border, brighter fill: settings groups, pressed state).

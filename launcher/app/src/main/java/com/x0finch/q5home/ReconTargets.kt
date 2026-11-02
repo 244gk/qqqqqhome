@@ -21,8 +21,17 @@ data class ReconTargets(
     val maxEvents: Int,
     /** Where it came from: repo / built-in. */
     val source: String,
+    /** List every method that calls a method whose "Class.name" matches (broadcast sends, page / service starts). */
+    val sites: List<Site> = emptyList(),
+    /** Constant tables: static fields of classes whose full name matches. */
+    val constants: Regex? = null,
+    /** Native libraries (.so file names) whose exported functions and device paths are listed. */
+    val nativeLibs: Regex? = null,
+    /** System / Global / Secure settings whose key matches: current values listed. */
+    val settings: Regex? = null,
 ) {
     class CodeGroup(val name: String, val pattern: Regex)
+    class Site(val name: String, val call: Regex)
 
     companion object {
         const val URL = "https://raw.githubusercontent.com/244gk/qqqqqhome/HEAD/config/recon-targets.json"
@@ -44,7 +53,7 @@ data class ReconTargets(
               "code": [
                 {
                   "name": "原车画面切换",
-                  "pattern": "original_screen|enter_original|switch_original|original_unlock|source_avin|media_box"
+                  "pattern": "original_screen|enter_original|switch_original|original_unlock|source_avin|media_box|switchOriginalMenu|setOriginal|AvinLogic\\.(switch|set|enter|change|open|start)"
                 },
                 {
                   "name": "仪表 / 车辆数据（车速、转速、车门等）",
@@ -61,7 +70,20 @@ data class ReconTargets(
                 "content://com.wwc2.canmcusdk.CanbusProvider/car_info",
                 "content://com.wwc2.main.provider.logic/logic"
               ],
-              "maxMethods": 15,
+              "sites": [
+                {
+                  "name": "发广播的地方",
+                  "call": "\\.(sendBroadcast|sendBroadcastAsUser|sendOrderedBroadcast|sendStickyBroadcast)${"$"}"
+                },
+                {
+                  "name": "打开页面 / 服务的地方",
+                  "call": "\\.(startActivity|startActivityAsUser|startService|startForegroundService|bindService|setComponent|setClassName)${"$"}|ComponentName\\.<init>${"$"}"
+                }
+              ],
+              "constants": "AvinInterface|VideoSource|CanBusDefine|APK_TO_MAIN|MAIN_TO_APK|MODULE_TO_MODULE|Define${"$"}|Defines${"$"}|Constant|Const${"$"}|Command|Cmd${"$"}|\\${"$"}Stub${"$"}",
+              "nativeLibs": "avin|video|signal|canbus|mcu|serial|uart|source|switch",
+              "settings": "original|origin|avin|canbus|can_|mcu|car|screen_mode|source|reverse|backcar|zlink|carplay",
+              "maxMethods": 25,
               "maxEvents": 60
             }
         """.trimIndent()
@@ -83,9 +105,16 @@ data class ReconTargets(
             }.orEmpty().take(MAX_GROUPS)
             val providers = o.optJSONArray("providers")?.let { a -> (0 until a.length()).map { a.getString(it) } }.orEmpty()
                 .filter { it.startsWith("content://com.wwc2") && it.length <= 200 }.distinct().take(MAX_PROVIDERS)
+            val sites = o.optJSONArray("sites")?.let { a ->
+                (0 until a.length()).mapNotNull { i ->
+                    val g = a.getJSONObject(i)
+                    regex(g.optString("call"))?.let { Site(g.optString("name").ifBlank { "调用" }.take(40), it) }
+                }
+            }.orEmpty().take(MAX_GROUPS)
             ReconTargets(
                 packages, code, regex(o.optString("strings")), providers,
                 o.optInt("maxMethods", 15).coerceIn(1, 40), o.optInt("maxEvents", 60).coerceIn(5, 200), source,
+                sites, regex(o.optString("constants")), regex(o.optString("nativeLibs")), regex(o.optString("settings")),
             )
         }.getOrNull()
 

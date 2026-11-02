@@ -267,6 +267,12 @@ class SignalCheck(private val context: Context) {
             ).joinToString(" · ")
         }
 
+        private fun ageText(s: Long) = when {
+            s < 120 -> "$s 秒"
+            s < 7200 -> "${s / 60} 分钟"
+            else -> "${s / 3600} 小时"
+        }
+
         fun satellitesText(sats: List<Satellite>): String {
             if (sats.isEmpty()) return "还没收到卫星（天线没接好、在地库 / 室内，或刚开始搜）"
             val used = sats.count { it.usedInFix }
@@ -275,14 +281,17 @@ class SignalCheck(private val context: Context) {
             return String.format(Locale.US, "看到 %d 颗 · 用于定位 %d 颗 · 最强 %.0f dB-Hz（%s）", sats.size, used, best, quality)
         }
 
-        fun fixText(location: Location?, firstFixMs: Int?, nowMs: Long = System.currentTimeMillis()): String {
+        fun fixText(location: Location?, firstFixMs: Int?, nowMs: Long = System.currentTimeMillis(),
+                    nowElapsedNs: Long = android.os.SystemClock.elapsedRealtimeNanos()): String {
             if (location == null) return "还没定位（在室外冷启动一般要 30 秒到几分钟）"
-            val ageS = ((nowMs - location.time) / 1000).coerceAtLeast(0)
+            val ageS = (HomeGps.ageMs(location, nowMs, nowElapsedNs) / 1000).coerceAtLeast(0)
+            val rolledOver = location.time > 0 && HomeGps.correctedTime(location.time, nowMs) != location.time
             return listOfNotNull(
                 "已定位",
                 if (location.hasAccuracy()) "精度约 ±${location.accuracy.toInt()} 米" else null,
                 firstFixMs?.let { "首次定位用时 ${it / 1000} 秒" },
-                if (ageS > 5) "最近一次是 $ageS 秒前" else null,
+                if (ageS > 5) "最近一次是 ${ageText(ageS)}前" else null,
+                if (rolledOver) "GPS 报的日期早了 1024 周（周数翻转），已自动修正" else null,
             ).joinToString(" · ")
         }
     }

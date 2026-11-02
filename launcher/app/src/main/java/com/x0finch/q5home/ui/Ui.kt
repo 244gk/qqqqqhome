@@ -111,15 +111,26 @@ object Ui {
         addState(intArrayOf(), ColorDrawable(Color.TRANSPARENT))
     }
 
-    /** Clickable row: darkens slightly when pressed; when selected (left-side category) it's a small resting card; accent outline when focused via knob. */
+    /**
+     * Layer for things that sit ON a glass card (buttons, the selected category, menu rows): a light translucent fill plus one
+     * thin rim — no shadow and no glass of its own. A second glass layer over a glass card shows the background shifted and
+     * tinted differently, and its shadow draws a dark ring around it: that is what read as uneven "transitions" around buttons.
+     * The card's own glass shows through instead, so the button blends into it.
+     */
+    fun inner(context: Context, radiusDp: Number, pressed: Boolean = false, strokeColor: Int = 0, strokeDp: Number = 1): GradientDrawable =
+        rounded(context,
+            if (dark) (if (pressed) 0x33FFFFFF else 0x1AFFFFFF) else (if (pressed) 0x24000000 else 0x12000000),
+            radiusDp,
+            if (strokeColor != 0) strokeColor else if (dark) 0x2EFFFFFF else 0x1F000000,
+            strokeDp)
+
+    /** Clickable row: lightens slightly when pressed; when selected (left-side category) a light inner layer; accent outline when focused via knob. */
     fun rowBackground(context: Context, radiusDp: Number = 14, selected: Boolean = false): Drawable =
         StateListDrawable().apply {
             addState(intArrayOf(android.R.attr.state_focused),
-                rounded(context, if (selected) cardColors(dark, BentoDrawable.Style.RESTING, null).bottom else PRESSED,
-                    radiusDp, ACCENT, 2))
+                if (selected) inner(context, radiusDp, strokeColor = ACCENT, strokeDp = 2) else rounded(context, PRESSED, radiusDp, ACCENT, 2))
             addState(intArrayOf(android.R.attr.state_pressed), rounded(context, PRESSED, radiusDp))
-            addState(intArrayOf(), if (selected) bento(context, radiusDp, BentoDrawable.Style.RESTING)
-                else ColorDrawable(Color.TRANSPARENT))
+            addState(intArrayOf(), if (selected) inner(context, radiusDp) else ColorDrawable(Color.TRANSPARENT))
         }
 
     enum class Font(val res: Int) { LIGHT(R.font.outfit_light), REGULAR(R.font.outfit_regular), MEDIUM(R.font.outfit_medium) }
@@ -158,7 +169,7 @@ object Ui {
                 PillStyle.PRIMARY -> {
                     addState(intArrayOf(android.R.attr.state_focused), rounded(context, ACCENT, r, TEXT, 2))
                     addState(intArrayOf(android.R.attr.state_pressed), rounded(context, ACCENT, r).apply { alpha = 190 })
-                    addState(intArrayOf(), bento(context, r, BentoDrawable.Style.LIFTED, fill = ACCENT))
+                    addState(intArrayOf(), rounded(context, ACCENT, r))
                 }
                 PillStyle.DANGER -> {
                     val tint = DANGER and 0x00FFFFFF or (if (dark) 0x33000000 else 0x1F000000)
@@ -167,10 +178,10 @@ object Ui {
                     addState(intArrayOf(), rounded(context, tint, r))
                 }
                 PillStyle.SECONDARY -> {
-                    addState(intArrayOf(android.R.attr.state_focused),
-                        rounded(context, cardColors(dark, BentoDrawable.Style.RESTING, null).bottom, r, ACCENT, 2))
-                    addState(intArrayOf(android.R.attr.state_pressed), bento(context, r, BentoDrawable.Style.RESTING))
-                    addState(intArrayOf(), bento(context, r, BentoDrawable.Style.LIFTED))
+                    // Buttons sit on glass cards: a light inner layer, not glass of their own (see [inner]).
+                    addState(intArrayOf(android.R.attr.state_focused), inner(context, r, strokeColor = ACCENT, strokeDp = 2))
+                    addState(intArrayOf(android.R.attr.state_pressed), inner(context, r, pressed = true))
+                    addState(intArrayOf(), inner(context, r))
                 }
             }
         }
@@ -193,14 +204,6 @@ object Ui {
             isClickable = true
             setOnClickListener { onClick() }
             layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(context, 48))
-            // The button's shadow is drawn outside its bounds: once placed in a row / card, disable clipping two levels up, or the shadow gets cut into a box.
-            addOnAttachStateChangeListener(object : View.OnAttachStateChangeListener {
-                override fun onViewAttachedToWindow(v: View) {
-                    var p = v.parent
-                    repeat(2) { (p as? ViewGroup)?.let { g -> g.clipChildren = false; g.clipToPadding = false }; p = p?.parent }
-                }
-                override fun onViewDetachedFromWindow(v: View) {}
-            })
         }
 
     /** Lets shadows draw outside the view's bounds: every container level holding the card must disable clipping. */

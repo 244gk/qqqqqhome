@@ -15,11 +15,12 @@ import kotlin.concurrent.thread
  * the path contains a random string so other devices on the same network can't guess it.
  *
  * [report] returns the focused report Markdown (null while it is still being generated); [full] the full report, if one was
- * generated on the recon page.
+ * generated on the recon page; [events] the background event log since a time (null = all), or null when there is none.
  */
 class LocalShare(
     private val report: () -> String?,
     private val full: () -> String? = { null },
+    private val events: (sinceMs: Long?) -> String? = { null },
     port: Int = DEFAULT_PORT,
 ) {
     private val server: ServerSocket = runCatching { ServerSocket().apply { reuseAddress = true; bind(InetSocketAddress(port)) } }
@@ -67,6 +68,8 @@ class LocalShare(
             method == "GET" && path == base -> Triple(200, HTML, page())
             method == "GET" && path == "${base}report.md" ->
                 report()?.let { Triple(200, "text/markdown; charset=utf-8", it) } ?: Triple(503, TEXT, "报告还在生成，稍后刷新")
+            method == "GET" && path == "${base}events.md" ->
+                events(null)?.let { Triple(200, "text/markdown; charset=utf-8", it) } ?: Triple(404, TEXT, "还没有事件记录")
             method == "GET" && path == "${base}full.md" ->
                 full()?.let { Triple(200, "text/markdown; charset=utf-8", it) } ?: Triple(404, TEXT, "没有生成完整报告")
             else -> Triple(404, TEXT, "没有这个页面")
@@ -86,6 +89,7 @@ class LocalShare(
     private fun page(): String {
         val md = report()
         val fullMd = full()
+        val recent = events(System.currentTimeMillis() - RECENT_MS)
         val refresh = if (md == null) "<meta http-equiv=\"refresh\" content=\"5\">" else ""
         fun section(id: String, file: String, text: String) = """
               <button onclick="var t=document.getElementById('$id');t.select();document.execCommand('copy');this.textContent='已复制'">复制全部</button>
@@ -110,6 +114,11 @@ class LocalShare(
               ${if (md == null) "正在生成重点报告（几十秒），本页会自动刷新…" else section("r", "report.md", md) +
                 "<p><small>点「复制全部」，直接发出去就行。</small></p>"}
             </div>
+            <h2>事件记录（最近 30 分钟）</h2>
+            <div class="card">
+              ${if (recent == null) "还没有事件记录。" else section("e", "events.md", recent).replace("下载 events.md", "下载全部记录") +
+                "<p><small>q5home 在后台只听不发，记下广播、数据变化、设置和属性变化。操作完车机后，复制这一段发出去；更早的在「下载全部记录」里。</small></p>"}
+            </div>
             ${if (fullMd == null) "" else "<h2>完整报告</h2><div class=\"card\">" + section("f", "full.md", fullMd) + "</div>"}
             </body></html>
         """.trimIndent()
@@ -118,6 +127,7 @@ class LocalShare(
     companion object {
         const val DEFAULT_PORT = 8765
         const val TIMEOUT_MS = 15 * 60_000L
+        const val RECENT_MS = 30 * 60_000L
         private const val MAX_BODY = 16 * 1024
         private const val HTML = "text/html; charset=utf-8"
         private const val TEXT = "text/plain; charset=utf-8"

@@ -1,0 +1,94 @@
+name: build
+
+# Reusable build: APK, lint, unit tests + screenshot tests, signing check. Called by the launcher (release) and demo workflows;
+# its artifacts (q5home-apk, fakeapps-apk, screenshots, test-reports) belong to the calling run.
+on:
+  workflow_call:
+    outputs:
+      version:
+        description: Version name 1.0.<sequence>
+        value: ${{ jobs.build.outputs.version }}
+
+jobs:
+  # Build the APK, lint, unit tests + multi-resolution screenshots
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: launcher
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # version = version-base + commit count, needs full history
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+
+      # The signing key comes from GitHub Secrets (Q5HOME_KEYSTORE is the base64-encoded keystore). On main, fail without a key
+      # so we never publish with the wrong signature; other branches fall back to a temporary debug signature, for testing only.
+      - name: Decode signing key
+        env:
+          KEYSTORE_B64: ${{ secrets.Q5HOME_KEYSTORE }}
+          KEYSTORE_PASSWORD: ${{ secrets.Q5HOME_KEYSTORE_PASSWORD }}
+        run: |
+          if [ -z "$KEYSTORE_B64" ] || [ -z "$KEYSTORE_PASSWORD" ]; then
+            if [ "$GITHUB_REF" = "refs/heads/main" ]; then
+              echo "::error::Missing signing key (Secrets: Q5HOME_KEYSTORE / Q5HOME_KEYSTORE_PASSWORD); cannot build a release on main"
+              exit 1
+            fi
+            echo "::warning::No signing key, using a temporary debug signature (cannot be installed over official releases)"
+            exit 0
+          fi
+          echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/q5home.keystore"
+          echo "Q5HOME_KEYSTORE_FILE=$RUNNER_TEMP/q5home.keystore" >> "$GITHUB_ENV"
+          echo "Q5HOME_KEYSTORE_PASSWORD=$KEYSTORE_PASSWORD" >> "$GITHUB_ENV"
+
+      - name: Build, lint, test
+        run: ./gradlew --no-daemon :app:assembleRelease :app:lintRelease :app:testDebugUnitTest :fakeapps:assembleRelease
+
+      # Verify: the APK's signing certificate must match the private key (so a misconfiguration can't silently use another signature).
+      - name: Check APK signature
+        run: |
+          apksigner=$(ls "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -1)
+          apk_fp=$("$apksigner" verify --print-certs app/build/outputs/apk/release/app-release.apk \
+            | grep -m1 'SHA-256 digest' | awk '{print $NF}')
+          echo "APK signing certificate SHA-256: $apk_fp"
+          if [ -n "${Q5HOME_KEYSTORE_FILE:-}" ]; then
+            key_fp=$(keytool -list -v -keystore "$Q5HOME_KEYSTORE_FILE" -storepass "$Q5HOME_KEYSTORE_PASSWORD" -alias q5home \
+              | grep -m1 'SHA256:' | sed 's/.*SHA256: //; s/://g' | tr 'A-F' 'a-f')
+            if [ "$apk_fp" != "$key_fp" ]; then
+              echo "::error::APK signature does not match the private key (the key alias must be q5home)"
+              exit 1
+            fi
+            echo "✅ Signed with the private key"
+          fi
+
+      - id: version
+        # Steps run in launcher/ (defaults.run.working-directory), so version-base is one level up; must match app/build.gradle.
+        run: echo "version=1.0.$(( $(cat ../version-base) + $(git rev-list --count HEAD) ))" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: q5home-apk
+          path: launcher/app/build/outputs/apk/release/app-release.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: fakeapps-apk
+          path: launcher/fakeapps/build/outputs/apk/*/release/*.apk
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: screenshots
+          path: launcher/app/build/screenshots/
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-reports
+          path: |
+            launcher/app/build/reports/tests/
+            launcher/app/build/reports/lint-results-release.html
+

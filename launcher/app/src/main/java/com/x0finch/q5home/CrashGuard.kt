@@ -69,5 +69,7 @@ class Q5App : Application() {
     override fun onCreate() {
         super.onCreate()
         CrashGuard.install(this)
+        // Background recon recording (listen-only; see EventRecorder).
+        EventRecorder.start(this)
     }
 }

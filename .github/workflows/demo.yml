@@ -1,0 +1,62 @@
+name: demo
+
+# Emulator demo, started by hand (Actions → demo → Run workflow) when a recording is wanted: builds the APK, then taps through
+# the app on an emulator and records it. Separate from releasing (launcher.yml).
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    uses: ./.github/workflows/build.yml
+    secrets: inherit
+
+  # Tap through the app on an Android 12 emulator (1920x720, a common head-unit ratio): screenshots + a recording with captions and tap rings
+  emulator-demo:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: q5home-apk
+          path: apk
+      - uses: actions/download-artifact@v4
+        with:
+          name: fakeapps-apk
+          path: fakeapps
+
+      # Pillow: marks tap positions on screenshots and draws rings; OpenCV: decodes the QR code on the recon page; ffmpeg + CJK fonts: video post-processing.
+      - name: Install Pillow, ffmpeg, CJK font
+        run: |
+          pip install --quiet pillow opencv-python-headless
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg fonts-noto-cjk > /dev/null
+
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Run demo on emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 31
+          target: default
+          arch: x86_64
+          disable-animations: false # keep page transitions visible in the recording
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -skin 1920x720
+          script: python3 ci/demo.py --launcher apk/app-release.apk --fake fakeapps/zlink/release/fakeapps-zlink-release.apk --fake fakeapps/oem/release/fakeapps-oem-release.apk --out demo-out
+
+      # Add a caption strip below the video and rings at taps / long presses; the raw recording is kept as demo-raw.mp4.
+      - name: Render demo video
+        if: always()
+        run: python3 ci/render_video.py demo-out
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: emulator-demo
+          path: demo-out/
+

@@ -1,5 +1,5 @@
 {
-  "comment": "车机「提交重点报告」时下载这个文件，决定只读分析哪些应用、找哪些代码、试读哪些接口。改这里就能换分析方向，车机不用更新。只能决定读什么，不能让车机做任何写入或切换。",
+  "comment": "车机「提交重点报告」时下载这个文件，决定只读分析哪些应用、找哪些代码、试读哪些接口。改这里就能换分析方向，车机不用更新。code 的 pattern 同时匹配代码里的字符串、调用的方法 / 读写的字段名和方法自己的名字；sites 列出调用了这些方法的地方（发广播、打开页面）；constants 列出类名匹配的常量表；nativeLibs 读匹配的原生库导出函数和设备路径；settings 列出名字匹配的系统设置当前值。只能决定读什么，不能让车机做任何写入或切换。",
   "packages": [
     "com.wwc2.launcher",
     "com.wwc2.main",
@@ -11,7 +11,7 @@
   "code": [
     {
       "name": "原车画面切换",
-      "pattern": "original_screen|enter_original|switch_original|original_unlock|source_avin|media_box"
+      "pattern": "original_screen|enter_original|switch_original|original_unlock|source_avin|media_box|switchOriginalMenu|setOriginal|AvinLogic\\.(switch|set|enter|change|open|start)"
     },
     {
       "name": "仪表 / 车辆数据（车速、转速、车门等）",
@@ -28,6 +28,19 @@
     "content://com.wwc2.canmcusdk.CanbusProvider/car_info",
     "content://com.wwc2.main.provider.logic/logic"
   ],
-  "maxMethods": 15,
+  "sites": [
+    {
+      "name": "发广播的地方",
+      "call": "\\.(sendBroadcast|sendBroadcastAsUser|sendOrderedBroadcast|sendStickyBroadcast)$"
+    },
+    {
+      "name": "打开页面 / 服务的地方",
+      "call": "\\.(startActivity|startActivityAsUser|startService|startForegroundService|bindService|setComponent|setClassName)$|ComponentName\\.<init>$"
+    }
+  ],
+  "constants": "AvinInterface|VideoSource|CanBusDefine|APK_TO_MAIN|MAIN_TO_APK|MODULE_TO_MODULE|Define$|Defines$|Constant|Const$|Command|Cmd$|\\$Stub$",
+  "nativeLibs": "avin|video|signal|canbus|mcu|serial|uart|source|switch",
+  "settings": "original|origin|avin|canbus|can_|mcu|car|screen_mode|source|reverse|backcar|zlink|carplay",
+  "maxMethods": 25,
   "maxEvents": 60
 }

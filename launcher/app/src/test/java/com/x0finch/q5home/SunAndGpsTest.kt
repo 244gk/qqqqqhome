@@ -59,13 +59,21 @@ class SunAndGpsTest {
     fun homeGpsText() {
         val now = 1_000_000L
         fun loc(block: Location.() -> Unit) = Location("gps").apply { time = now; block() }
-        assertNull(HomeGps.text(null, now))
-        assertNull("stale fixes are not shown", HomeGps.text(loc { speed = 10f; time = now - 20_000 }, now))
+        assertNull(HomeGps.text(null, now, 0))
+        assertNull("stale fixes are not shown", HomeGps.text(loc { speed = 10f; time = now - 20_000 }, now, 0))
         // 72 km/h heading northeast, altitude 120 m.
         assertEquals("72 km/h  ·  东北 45°  ·  海拔 120 m",
-            HomeGps.text(loc { speed = 20f; bearing = 45f; altitude = 120.4 }, now))
+            HomeGps.text(loc { speed = 20f; bearing = 45f; altitude = 120.4 }, now, 0))
         // Stationary: no heading shown.
-        assertEquals("0 km/h  ·  海拔 76 m", HomeGps.text(loc { speed = 0f; bearing = 200f; altitude = 76.0 }, now))
+        assertEquals("0 km/h  ·  海拔 76 m", HomeGps.text(loc { speed = 0f; bearing = 200f; altitude = 76.0 }, now, 0))
+        // GPS week rollover: a fix whose date is exactly 1024 weeks behind is still fresh.
+        val real = 1_762_000_000_000L
+        assertEquals("36 km/h", HomeGps.text(loc { speed = 10f; time = real - HomeGps.ROLLOVER_MS - 2_000 }, real, 0))
+        assertNull(HomeGps.text(loc { speed = 10f; time = real - HomeGps.ROLLOVER_MS - 60_000 }, real, 0))
+        // With the boot clock on the fix, freshness comes from it, whatever date the chip reports.
+        val boot = 50_000_000_000L
+        assertEquals("36 km/h", HomeGps.text(loc { speed = 10f; time = 12345L; elapsedRealtimeNanos = boot }, now, boot + 3_000_000_000L))
+        assertNull(HomeGps.text(loc { speed = 10f; elapsedRealtimeNanos = boot }, now, boot + 20_000_000_000L))
         assertEquals("北", HomeGps.compass(359f))
         assertEquals("南", HomeGps.compass(180f))
         assertEquals("西北", HomeGps.compass(-45f))

@@ -712,6 +712,20 @@ class SettingsActivity : Activity() {
                 isEnabled = !generatingFull
                 alpha = if (isEnabled) 1f else 0.4f
             }).first to 1f)
+        val events = EventLog.lines(this)
+        val eventStatus = if (events.isEmpty()) "后台一直在听（只听不发），还没有记录。在车上操作一轮后，扫码网页里复制「事件记录」"
+            else "已记录 ${events.size} 条，从 ${events.first().substring(5, 16)} 起。操作完车机后，在扫码网页里复制「事件记录」"
+        tilesRow(tile(R.drawable.ui_info, "事件记录", sub = eventStatus, subLines = 3,
+            action = Ui.pill(this, "清空") {
+                Menus.confirm(overlay, this, "清空事件记录", "只删 q5home 自己记下的事件，车机不受影响。", "清空", danger = true) {
+                    EventLog.clear(this)
+                    EventRecorder.note(this, "提示", "事件记录已清空")
+                    render()
+                }
+            }.apply {
+                isEnabled = events.isNotEmpty()
+                alpha = if (isEnabled) 1f else 0.4f
+            }).first to 1f)
         card(*r.facts.map { (title, value) -> info(title, value) }.toTypedArray(), title = "要点")
 
         val shown = r.candidates.take(12)
@@ -722,6 +736,8 @@ class SettingsActivity : Activity() {
             if (r.candidates.size > shown.size) hint("还有 ${r.candidates.size - shown.size} 个，见完整报告。")
         }
 
+        hint("事件记录：q5home 运行时在后台只听不发，记下广播、厂商数据接口的变化、系统设置和属性的变化，存在 q5home 自己的文件里（最多 2 MB）。" +
+            "被杀掉的那段时间没有记录，报告里能看到每次重新启动的时间。")
         hint("重点报告：只看仓库 config/recon-targets.json 指定的应用、代码和接口（生成时自动下载最新的，改分析方向不用更新应用），" +
             "只读，不改车机，也不会上传到任何地方。手机扫码打开的网页最上面就是重点报告，点「复制全部」发出去就行。" +
             "临时网页只在这一页开着时运行，15 分钟后自动关闭。")
@@ -794,7 +810,12 @@ class SettingsActivity : Activity() {
         if (lastMarkdown == null) Thread {
             runCatching { Recon.focused(this, ReconTargets.load()) }.onSuccess { lastMarkdown = it.markdown }
         }.start()
-        share = runCatching { LocalShare(report = { lastMarkdown }, full = { lastFull }) }
+        share = runCatching {
+            LocalShare(report = { lastMarkdown }, full = { lastFull }, events = { since ->
+                if (EventLog.lines(this).isEmpty()) null
+                else EventLog.markdown(this, since, if (since == null) "事件记录（全部）" else "事件记录（最近 30 分钟）")
+            })
+        }
             .onFailure { overlay.snackbar("开不了临时网页：${it.message}") }.getOrNull()
         // Close automatically when time is up (the web page side also rejects requests after the timeout).
         val started = share

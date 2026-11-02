@@ -226,11 +226,13 @@ class MainActivity : Activity() {
         if (config.homeGps) gps.start() else gps.stop()
         handler.removeCallbacks(tripTicker)
         handler.post(tripTicker)
+        EventRecorder.note(this, "首页", "q5home 首页显示")
     }
 
     override fun onPause() {
         super.onPause()
         if (!started) return
+        EventRecorder.note(this, "首页", "q5home 首页离开")
         gps.stop()
         handler.removeCallbacks(tripTicker)
     }

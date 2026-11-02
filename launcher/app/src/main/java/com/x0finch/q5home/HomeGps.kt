@@ -9,6 +9,7 @@ import android.location.LocationListener
 import android.location.LocationManager
 import android.os.Bundle
 import android.os.Looper
+import android.os.SystemClock
 import kotlin.math.roundToInt
 
 /**
@@ -62,10 +63,31 @@ class HomeGps(private val context: Context, private val onChange: (Location?) ->
         /** Home screen GPS card: speed (large) + heading · altitude. */
         class Reading(val speedKmh: Int?, val detail: String)
 
+        /** GPS counts weeks in 10 bits: chips that miss the rollover report times exactly 1024 weeks too early. */
+        const val ROLLOVER_MS = 1024L * 7 * 24 * 3600 * 1000
+
+        /** [time] (ms since 1970) with whole 1024-week rollovers added back when it is that far behind [nowMs]. */
+        fun correctedTime(time: Long, nowMs: Long): Long {
+            var t = time
+            var n = 0
+            while (time > 0 && nowMs - t > ROLLOVER_MS - 24 * 3600 * 1000L && n++ < 4) t += ROLLOVER_MS
+            return t
+        }
+
+        /**
+         * How old a fix is. Uses the boot clock ([Location.getElapsedRealtimeNanos]) when the fix has it: it doesn't depend on
+         * the date the GPS chip reports (on this head unit that date is 1024 weeks behind). Otherwise the corrected fix time.
+         */
+        fun ageMs(l: Location, nowMs: Long = System.currentTimeMillis(),
+                  nowElapsedNs: Long = SystemClock.elapsedRealtimeNanos()): Long =
+            if (l.elapsedRealtimeNanos > 0 && nowElapsedNs >= l.elapsedRealtimeNanos) (nowElapsedNs - l.elapsedRealtimeNanos) / 1_000_000
+            else nowMs - correctedTime(l.time, nowMs)
+
         /** Returns null without a fresh fix. Heading is shown only while moving (GPS heading is unreliable when stationary). */
-        fun reading(location: Location?, nowMs: Long = System.currentTimeMillis()): Reading? {
+        fun reading(location: Location?, nowMs: Long = System.currentTimeMillis(),
+                    nowElapsedNs: Long = SystemClock.elapsedRealtimeNanos()): Reading? {
             val l = location ?: return null
-            if (nowMs - l.time > STALE_MS) return null
+            if (ageMs(l, nowMs, nowElapsedNs) > STALE_MS) return null
             val detail = listOfNotNull(
                 if (l.hasBearing() && l.hasSpeed() && l.speed >= 1.5f) "${compass(l.bearing)} ${l.bearing.roundToInt() % 360}°" else null,
                 if (l.hasAltitude()) "海拔 ${l.altitude.roundToInt()} m" else null,
@@ -74,8 +96,9 @@ class HomeGps(private val context: Context, private val onChange: (Location?) ->
         }
 
         /** Single-line text version (speed · heading · altitude); returns null without a fresh fix. */
-        fun text(location: Location?, nowMs: Long = System.currentTimeMillis()): String? {
-            val r = reading(location, nowMs) ?: return null
+        fun text(location: Location?, nowMs: Long = System.currentTimeMillis(),
+                 nowElapsedNs: Long = SystemClock.elapsedRealtimeNanos()): String? {
+            val r = reading(location, nowMs, nowElapsedNs) ?: return null
             val parts = listOfNotNull(r.speedKmh?.let { "$it km/h" }, r.detail.ifEmpty { null })
             return parts.takeIf { it.isNotEmpty() }?.joinToString("  ·  ")
         }

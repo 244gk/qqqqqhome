@@ -1,0 +1,10 @@
+/* For tests of ElfScan (compiled into libavin-test.so.bin with: gcc -shared -fPIC -Os -s -o libavin-test.so.bin libavin-test.c).
+ * Simulates a vendor JNI library that switches the video source through a device node. */
+static const char *node = "/dev/avin_switch";
+static const char *tty = "/dev/ttyMT1";
+static const char *unrelated = "hello world";
+
+int Java_com_wwc2_main_avin_AvinSignal_switchSource(int source) { return node[source] + tty[source] + unrelated[source]; }
+int avin_open(void) { return 1; }
+static int hidden(void) { return 2; }
+int use_hidden(void) { return hidden(); }

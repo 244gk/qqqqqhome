@@ -279,7 +279,7 @@ object Recon {
         fun info(pkg: String) = runCatching { pm.getPackageInfo(pkg, 0) }.getOrNull()
         val self = info(context.packageName)?.versionName ?: "?"
 
-        md.appendLine("<!-- q5home-recon focused v1 -->")
+        md.appendLine("<!-- q5home-recon focused v2 -->")
         md.appendLine("由 q5home $self 在车上生成（$now），**重点报告**，只读，没有改动车机。分析目标：${targets.source}。")
         md.appendLine()
 
@@ -300,13 +300,22 @@ object Recon {
         val apks = targets.packages.mapNotNull { pkg ->
             info(pkg)?.applicationInfo?.sourceDir?.let { pkg to File(it) }
         }
+        // Background event log: shown separately on the web page (it can be long); here only how much there is.
+        val events = EventLog.lines(context)
+        md.appendLine("## 后台事件记录")
+        md.appendLine(if (events.isEmpty()) "还没有记录。" else
+            "共 ${events.size} 条，从 ${events.first().take(19)} 到 ${events.last().take(19)}。扫码网页里「事件记录」单独复制。")
+        md.appendLine()
+
         for (group in targets.code) {
             md.appendLine("## ${group.name}（只读反汇编）")
-            md.appendLine("匹配 `${group.pattern.pattern}` 的方法：按顺序列出字符串（str）、整数（int）、调用（call）、读写字段（get / put）。")
+            md.appendLine("用到匹配 `${group.pattern.pattern}` 的字符串、调用或字段（或自己就叫这个名字）的方法：" +
+                "按顺序列出字符串（str）、整数（int）、调用（call）、读写字段（get / put）。")
             md.appendLine()
             var any = false
             for ((pkg, apk) in apks) {
-                val methods = DexScan.scanApk(apk, { group.pattern.containsMatchIn(it) }, targets.maxMethods, targets.maxEvents)
+                val match = { s: String -> group.pattern.containsMatchIn(s) }
+                val methods = DexScan.scanApk(apk, match, targets.maxMethods, targets.maxEvents, refs = match)
                 if (methods.isEmpty()) continue
                 any = true
                 md.appendLine("### `$pkg`（${methods.size} 个方法）")
@@ -329,33 +338,147 @@ object Recon {
             md.appendLine()
         }
 
+        for (site in targets.sites) {
+            md.appendLine("## ${site.name}（只读反汇编）")
+            md.appendLine("调用了匹配 `${site.call.pattern}` 的方法的地方，以及这个方法里用到的字符串（广播动作、参数名、包名 / 类名）。")
+            md.appendLine()
+            var any = false
+            for ((pkg, apk) in apks) {
+                val found = DexScan.sitesApk(apk, { site.call.containsMatchIn(it) }, SITE_LIMIT)
+                if (found.isEmpty()) continue
+                any = true
+                md.appendLine("### `$pkg`（${found.size} 处${if (found.size >= SITE_LIMIT) "，只列前 $SITE_LIMIT 处" else ""}）")
+                found.forEach { f ->
+                    md.appendLine("- `${f.name}` → ${f.calls.joinToString { "`${it.substringAfterLast('.')}`" }}：" +
+                        f.strings.ifEmpty { listOf("（没有字符串）") }.joinToString(" ") { "`$it`" })
+                }
+                md.appendLine()
+            }
+            if (!any) md.appendLine("（这些应用里没找到）\n")
+        }
+
+        targets.constants?.let { pattern ->
+            md.appendLine("## 常量表（类名匹配 `${pattern.pattern}`）")
+            md.appendLine("每个类的静态字段和值；没有值的是在代码里赋值的（比如枚举），只列名字。整数同时给出十六进制。")
+            md.appendLine()
+            for ((pkg, apk) in apks) {
+                val tables = DexScan.constantsApk(apk, { name ->
+                    LIBRARY_CLASS.none { name.startsWith(it) } && pattern.containsMatchIn(name)
+                })
+                if (tables.isEmpty()) continue
+                md.appendLine("### `$pkg`（${tables.size} 个类）")
+                tables.forEach { t ->
+                    md.appendLine("- `${t.className}`：" + t.fields.joinToString(" · ") { (k, v) -> if (v == null) "`$k`" else "`$k=$v`" })
+                }
+                md.appendLine()
+            }
+        }
+
+        targets.nativeLibs?.let { pattern ->
+            md.appendLine("## 原生库（只读文件内容，不加载、不运行）")
+            md.appendLine("文件名匹配 `${pattern.pattern}` 的 .so：导出的函数（Java_ 开头的是给 Java 调的入口）和像设备节点、串口、视频源的字符串。")
+            md.appendLine()
+            val libs = nativeLibraries(context, targets.packages, pattern)
+            if (libs.isEmpty()) md.appendLine("（没找到）\n")
+            for ((where, bytes) in libs) {
+                val r = ElfScan.scan(bytes) ?: continue
+                md.appendLine("### `$where`（${bytes.size / 1024} KB）")
+                md.appendLine("- 导出函数 ${r.exports.size} 个：" + r.exports.joinToString(" ") { "`$it`" }.ifEmpty { "（无）" })
+                md.appendLine("- 字符串：" + r.strings.joinToString(" ") { "`$it`" }.ifEmpty { "（无）" })
+                md.appendLine()
+            }
+        }
+
+        // Property names mentioned in the vendor code, with their current values (the recorder watches these for changes).
+        md.appendLine("## 代码里提到的系统属性（当前值）")
+        val propNames = apks.flatMap { (_, apk) ->
+            ApkStrings.fromApk(apk, limit = 300, filter = { PROP_NAME.matches(it) && !it.endsWith('.') })
+        }.distinct().sorted().take(PROP_LIMIT)
+        if (propNames.isEmpty()) md.appendLine("（没找到）")
+        else md.appendLine(propNames.joinToString(" · ") { "`$it`=${prop(it).ifEmpty { "（空）" }.take(60)}" })
+        md.appendLine()
+
+        targets.settings?.let { pattern ->
+            md.appendLine("## 系统设置当前值（键名匹配 `${pattern.pattern}`）")
+            for ((table, uri) in listOf("system" to Settings.System.CONTENT_URI, "global" to Settings.Global.CONTENT_URI,
+                    "secure" to Settings.Secure.CONTENT_URI)) {
+                val rows = runCatching {
+                    context.contentResolver.query(uri, arrayOf("name", "value"), null, null, null)?.use { c ->
+                        val out = mutableListOf<String>()
+                        while (c.moveToNext()) {
+                            val k = c.getString(0) ?: continue
+                            if (pattern.containsMatchIn(k)) out += "`$k=${(c.getString(1) ?: "null").take(60)}`"
+                        }
+                        out
+                    }
+                }.getOrNull()
+                md.appendLine("- $table：" + when {
+                    rows == null -> "读不了"
+                    rows.isEmpty() -> "（没有匹配的）"
+                    else -> rows.sorted().joinToString(" ")
+                })
+            }
+            md.appendLine()
+        }
+
         if (targets.providers.isNotEmpty()) {
-            md.appendLine("## 数据接口试读（只读 query）")
-            targets.providers.forEach { md.appendLine("- `$it`：${queryProvider(context, it)}") }
+            md.appendLine("## 数据接口试读（只读 query + getType）")
+            targets.providers.forEach {
+                md.appendLine("- `$it`：${queryProvider(context, it)}；getType：${providerType(context, it)}")
+            }
             md.appendLine()
         }
 
         return Report(md.toString(), emptyList(), emptyList(), "车机摸底（重点）${Build.MODEL} $now")
     }
 
-    @Suppress("DEPRECATION")
-    private fun PackageInfo.longVersionCodeCompat(): Long =
-        if (Build.VERSION.SDK_INT >= 28) longVersionCode else versionCode.toLong()
+    private const val SITE_LIMIT = 30
+    private const val PROP_LIMIT = 150
+    private val PROP_NAME = Regex("^(persist|sys|vendor|debug|ro|init|dev|media|hw)\\.[A-Za-z0-9_.\\-]{2,80}$")
+    private val LIBRARY_CLASS = listOf("android.", "androidx.", "java.", "javax.", "kotlin.", "kotlinx.", "com.google.", "okhttp3.", "org.")
+    private const val MAX_LIB_BYTES = 16L shl 20
 
-    /** Read-only query of a content:// URI; returns the column names and first few rows (each cell cut to 60 chars). Waits at most 3 seconds. */
-    fun queryProvider(context: Context, uri: String): String {
-        val task = java.util.concurrent.FutureTask {
-            context.contentResolver.query(android.net.Uri.parse(uri), null, null, null, null)?.use { c ->
-                val cols = c.columnNames.toList()
-                val rows = mutableListOf<String>()
-                while (rows.size < PROVIDER_ROWS && c.moveToNext()) {
-                    rows += cols.indices.joinToString(", ") { i ->
-                        "${cols[i]}=" + (runCatching { c.getString(i) }.getOrNull() ?: "null").take(60)
+    /**
+     * Native libraries of the given apps whose file name matches [pattern]: inside the APK (lib/…/x.so), in the app's extracted
+     * library folder, and in /system/lib and /vendor/lib. Only reads the files; nothing is loaded. At most 12 libraries.
+     */
+    private fun nativeLibraries(context: Context, packages: List<String>, pattern: Regex): List<Pair<String, ByteArray>> {
+        val out = mutableListOf<Pair<String, ByteArray>>()
+        val seen = mutableSetOf<String>()
+        fun add(where: String, name: String, read: () -> ByteArray) {
+            if (out.size >= 12 || !name.endsWith(".so") || !pattern.containsMatchIn(name) || !seen.add(name)) return
+            runCatching { read() }.getOrNull()?.let { out += where to it }
+        }
+        for (pkg in packages) {
+            val app = runCatching { context.packageManager.getApplicationInfo(pkg, 0) }.getOrNull() ?: continue
+            app.sourceDir?.let { path ->
+                runCatching {
+                    java.util.zip.ZipFile(path).use { zip ->
+                        zip.entries().asSequence().filter { it.name.startsWith("lib/") && it.size in 1..MAX_LIB_BYTES }.forEach { e ->
+                            add("$pkg!${e.name}", e.name.substringAfterLast('/')) { zip.getInputStream(e).use { it.readBytes() } }
+                        }
                     }
                 }
-                "${c.count} 行，列 ${cols.joinToString()}" + rows.joinToString("") { "<br>　`$it`" }
-            } ?: "返回空（没有这个地址或不让读）"
+            }
+            app.nativeLibraryDir?.let { dir ->
+                File(dir).listFiles().orEmpty().filter { it.length() in 1..MAX_LIB_BYTES }.forEach { f -> add(f.path, f.name) { f.readBytes() } }
+            }
         }
+        for (dir in listOf("/system/lib", "/vendor/lib", "/system/lib64", "/vendor/lib64")) {
+            runCatching {
+                File(dir).listFiles().orEmpty().filter { it.length() in 1..MAX_LIB_BYTES }.forEach { f -> add(f.path, f.name) { f.readBytes() } }
+            }
+        }
+        return out
+    }
+
+    /** Read-only getType of a content:// URI (some providers answer this even when query returns nothing). Waits at most 3 seconds. */
+    fun providerType(context: Context, uri: String): String = withTimeout {
+        context.contentResolver.getType(android.net.Uri.parse(uri))?.let { "`$it`" } ?: "null"
+    }
+
+    private fun withTimeout(block: () -> String): String {
+        val task = java.util.concurrent.FutureTask(block)
         Thread(task, "recon-query").apply { isDaemon = true }.start()
         return try {
             task.get(3, java.util.concurrent.TimeUnit.SECONDS)
@@ -367,11 +490,33 @@ object Recon {
         }
     }
 
+    @Suppress("DEPRECATION")
+    private fun PackageInfo.longVersionCodeCompat(): Long =
+        if (Build.VERSION.SDK_INT >= 28) longVersionCode else versionCode.toLong()
+
+    /** Read-only query of a content:// URI; returns the column names and first few rows (each cell cut to 60 chars). Waits at most 3 seconds. */
+    fun queryProvider(context: Context, uri: String): String = withTimeout {
+            context.contentResolver.query(android.net.Uri.parse(uri), null, null, null, null)?.use { c ->
+                val cols = c.columnNames.toList()
+                val rows = mutableListOf<String>()
+                while (rows.size < PROVIDER_ROWS && c.moveToNext()) {
+                    rows += cols.indices.joinToString(", ") { i ->
+                        "${cols[i]}=" + (runCatching { c.getString(i) }.getOrNull() ?: "null").take(60)
+                    }
+                }
+                "${c.count} 行，列 ${cols.joinToString()}" + rows.joinToString("") { "<br>　`$it`" }
+            } ?: "返回空（没有这个地址或不让读）"
+    }
+
     /** Reads a system property (hidden API; returns an empty string if unreadable). */
+    fun prop(name: String): String = runCatching { propGetter!!.invoke(null, name) as String }.getOrDefault("")
+
+    /** Looked up once: the background recorder reads properties every couple of seconds. */
+    private val propGetter: java.lang.reflect.Method? by lazy { lookupPropGetter() }
+
     @SuppressLint("PrivateApi")
-    fun prop(name: String): String = runCatching {
-        Class.forName("android.os.SystemProperties").getMethod("get", String::class.java).invoke(null, name) as String
-    }.getOrDefault("")
+    private fun lookupPropGetter(): java.lang.reflect.Method? =
+        runCatching { Class.forName("android.os.SystemProperties").getMethod("get", String::class.java) }.getOrNull()
 
     /** Whether a local port is listening (only tries to connect, then disconnects immediately). */
     fun probe(port: Int, timeoutMs: Int = 300): Boolean = runCatching {

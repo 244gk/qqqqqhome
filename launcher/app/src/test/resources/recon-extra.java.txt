@@ -1,0 +1,46 @@
+package com.wwc2.fake;
+
+import android.content.Context;
+import android.content.Intent;
+
+/**
+ * For tests of DexScan's call / field matching, call sites and constant tables (compiled into recon-extra.dex with javac + d8;
+ * see DexScanTest). Simulates a vendor command table, an MCU call and a broadcast send.
+ */
+public class Tap {
+    public static void onOriginalClick(Context c) {
+        Mcu.switchOriginalMenu(1);
+        Intent i = new Intent(AvinInterface.ACTION);
+        i.putExtra("source", AvinInterface.SWITCH_ORIGINAL);
+        c.sendBroadcast(i);
+    }
+
+    public static void openZlink(Context c) {
+        c.startActivity(new Intent().setClassName("com.zjinnova.zlink", "com.zjinnova.zlink.MainActivity"));
+    }
+}
+
+class Mcu {
+    static int sink;
+
+    static void switchOriginalMenu(int v) {
+        sink = v;
+    }
+}
+
+interface AvinInterface {
+    int SWITCH_ORIGINAL = 0x21;
+    String ACTION = "com.wwc2.main.ACTION_SWITCH_SOURCE";
+    long BIG = 5000000000L;
+    boolean ON = true;
+    float RATIO = 1.5f;
+    int NEGATIVE = -300;
+}
+
+/** Fields set in code (like enum entries): listed without values; its static initializer is never picked as a match. */
+class Mode {
+    static final Object ORIGINAL = Mcu.class;
+    static {
+        Mcu.switchOriginalMenu(0);
+    }
+}

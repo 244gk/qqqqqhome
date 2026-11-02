@@ -35,8 +35,13 @@ class SignalCheckTest {
 
         assertTrue(SignalCheck.fixText(null, null).startsWith("还没定位"))
         val loc = Location("gps").apply { accuracy = 8f; time = 1_000_000L }
-        assertEquals("已定位 · 精度约 ±8 米 · 首次定位用时 42 秒", SignalCheck.fixText(loc, 42_000, nowMs = 1_002_000L))
-        assertTrue(SignalCheck.fixText(loc, null, nowMs = 1_060_000L).endsWith("最近一次是 60 秒前"))
+        assertEquals("已定位 · 精度约 ±8 米 · 首次定位用时 42 秒", SignalCheck.fixText(loc, 42_000, nowMs = 1_002_000L, nowElapsedNs = 0))
+        assertTrue(SignalCheck.fixText(loc, null, nowMs = 1_060_000L, nowElapsedNs = 0).endsWith("最近一次是 60 秒前"))
+        // GPS week rollover (seen on the head unit: "619319259 秒前"): the fix time is 1024 weeks behind; age ≈ 68 minutes, and it says so.
+        val now = 1_762_000_000_000L
+        val rolled = Location("gps").apply { time = now - HomeGps.ROLLOVER_MS - 4_059_000L }
+        assertEquals("已定位 · 最近一次是 67 分钟前 · GPS 报的日期早了 1024 周（周数翻转），已自动修正",
+            SignalCheck.fixText(rolled, null, nowMs = now, nowElapsedNs = 0))
     }
 
     /** Report text still works without permissions: no crash and no coordinates. */

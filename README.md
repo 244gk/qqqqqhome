@@ -120,7 +120,11 @@ then `launcher/build-and-install.sh --apk downloaded.apk`.
 
 ### CI (GitHub Actions)
 
-Not run on every push: start it by hand on the Actions page (launcher → Run workflow). Download the artifacts from the run:
+Not run on every push; both are started by hand on the Actions page:
+- **launcher** (release): build, lint, tests, then publish the Release. Artifacts: `q5home-apk`, `screenshots`, `test-reports`.
+- **demo** (emulator demo, only when wanted): build, then tap through the app on an emulator. Adds `emulator-demo`.
+
+Artifacts:
 
 | Artifact | Contents |
 |---|---|
@@ -173,8 +177,8 @@ On **Wi-Fi (unmetered networks)**, a background job downloads up to 2 new wallpa
   (internal versionCode = sequence × 10; the last digit is used for rollback releases).
 - **Download**: the "Download latest" badge at the top of this README downloads the latest APK directly (`releases/latest/download/q5home.apk`);
   the "Latest release" badge opens the latest Release page (versioned APK and release notes).
-- **Release**: pushing does not build anything. To release, open Actions → launcher → Run workflow (on `main`); once the build, tests and
-  the emulator demo pass, a GitHub Release `v1.0.<sequence>` is published with the APK attached. Release notes list the commits since
+- **Release**: pushing does not build anything. To release, open Actions → launcher → Run workflow (on `main`); once the build, lint, tests and the
+  signature check pass, a GitHub Release `v1.0.<sequence>` is published with the APK attached. Release notes list the commits since
   the previous release (wallpaper-feed commits left out).
 - **Updating on the head unit**: Desktop settings ("桌面设置") → Version update ("版本更新") → Download and install ("下载并安装"). After download, the sha256, package name and version are verified, then Android's install confirmation appears.
   The first time, q5home must be allowed to Install unknown apps ("安装未知应用") (the page guides you to system settings); if the head unit doesn't show that switch, run from a computer:
@@ -195,7 +199,8 @@ On **Wi-Fi (unmetered networks)**, a background job downloads up to 2 new wallpa
 
 Three layers of protection:
 
-1. **Prevent**: a release is only published if the emulator demo passes (including "no unexpected crashes"), so crashing builds never reach the head unit.
+1. **Prevent**: a release is only published if the build, lint and the unit / screenshot tests pass. The emulator demo
+   (Actions → demo) is run separately before bigger changes to catch crashes on a real Android system.
 2. **Protect**: if the same version crashes 3 times within 10 minutes, the launcher enters **safe mode** automatically: a minimal page (no wallpaper, tiles or online features)
    with big buttons for Open CarPlay ("打开 CarPlay"), Open original car ("打开原车"), Back to stock launcher ("回到原厂桌面"), Install fix / rollback version ("安装修复 / 回退版本") and Try normal start again ("再试一次正常启动"), so it never gets stuck in a crash loop.
    Installing a new version (fix or rollback) restores normal mode automatically.

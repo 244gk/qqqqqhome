@@ -102,6 +102,9 @@ Add package names here as they are identified:
     `BentoDrawable.drawGlass` adds the rest: one layer of that background exactly behind the card (no lens / magnified rim bands
     and no stacked outlines: they read as an inner frame), a single diagonal edge highlight, a very transparent tint that darkens over bright backgrounds (`Glass.luma`), and a soft glow
     under the finger while pressed (`setHotspot`). Scroll containers need `Glass.followScroll`, otherwise the glass is misaligned.
+    Only cards are glass. Anything that sits ON a card (buttons, the selected category, menu rows) uses `Ui.inner`: a light
+    translucent layer with one thin rim, no shadow and no glass of its own. Glass-on-glass shows the background shifted, and a
+    button's shadow draws a dark ring that reads as an uneven transition around it.
     **Dark only** (the owner's choice; `Ui.resolveDark` always returns true); the `appearance` setting is still read and written
     but no longer applied. Take all colors from `Ui`, never hardcode them.
     All pages are full screen (theme `windowFullscreen`, status bar hidden).
@@ -119,14 +122,24 @@ Add package names here as they are identified:
   - `fakeapps/` holds the fake ZLINK / original car apps used for CI recordings; never install them on the head unit (same package name as the real ZLINK).
   - In-app updates: `Updates.kt` (GitHub Release check / download / verify / PackageInstaller install), `UpdateJob.kt` (daily check).
     Version sequence = `version-base` + commit count (`app/build.gradle`). **Pushing does not build**: the `launcher` workflow only runs
-    when the owner starts it by hand (Actions → launcher → Run workflow on `main`); it builds, tests, runs the emulator demo and then
-    publishes the Release (notes = commits since the previous release). Only start it yourself when the owner asks.
+    when the owner starts it by hand (Actions → launcher → Run workflow on `main`); it builds, lints, runs the unit and screenshot
+    tests, checks the signature, then publishes the Release (notes = commits since the previous release). The emulator demo is a
+    separate workflow (`demo.yml`, Actions → demo), run only when a recording is wanted; both reuse `build.yml`.
+    Only start either yourself when the owner asks.
   - Head unit recon (no adb): `Recon.kt` (read-only collection), `LocalShare.kt` (temporary web page opened by scanning a QR code with
     a phone: the focused report at the top, ready to copy and send, and the full report below it once generated on the recon page;
     path contains a random string, closes after 15 minutes). **Reports are never uploaded and no GitHub token is used**: the owner copies
     the text and sends it. `QrCode.kt` (hand-written QR code, tests check fixed hashes).
-    `ApkStrings.kt` (reads string constants from vendor APKs), `DexScan.kt` (read-only disassembly: lists the call order in methods that use original-car-related strings;
-    tests use `test/resources/oem-switch.dex`, built from `oem-switch.java.txt` in the same directory with javac + d8).
+    `ApkStrings.kt` (reads string constants from vendor APKs), `DexScan.kt` (read-only disassembly: call order in methods that use
+    matching strings, call / access matching methods or fields, or are named that way; call sites such as sendBroadcast /
+    startActivity with their strings; constant tables with values; tests use `test/resources/oem-switch.dex` and `recon-extra.dex`,
+    built from the `.java.txt` files next to them with javac + d8), `ElfScan.kt` (reads a native library's exported functions and
+    device-path strings as bytes, never loads it; test library `libavin-test.so.bin` built from `libavin-test.c.txt` with gcc).
+    Background recording: `EventRecorder.kt` starts with the process (`Q5App`) and only listens: broadcasts (built-in plus
+    action-like names found in the vendor apps' code), change notifications of vendor content providers, System / Global / Secure
+    settings changes and polled system properties named in vendor code; `EventLog.kt` writes them to q5home's own file (2 MB cap,
+    oldest dropped), with every process start, so gaps show. It must never send, write or switch anything on the head unit.
+    The QR page has a separate "事件记录" (event log) section: the last 30 minutes, with the whole log as a download.
     The QR page shows the **focused report**: analysis targets come from `config/recon-targets.json` in the repository (downloaded when the report is generated; the same copy is built into `ReconTargets.kt`,
     and tests check that the two match). **To change the analysis focus, edit only this file; no release needed**. It may only decide what to read; never add the ability to write to or switch anything on the head unit.
     Only Full report ("完整报告") lists all apps, system properties, etc.
@@ -147,7 +160,7 @@ Add package names here as they are identified:
     In `wallpaper_sun` mode, wallpapers are split into day / night by `Wallpapers.isNight` (hardcoded for built-ins, judged by brightness for online ones).
   - Default launcher: `HomeRole.kt` (requests the HOME role via RoleManager; restore goes through the system Home app settings). The stock launcher is never disabled.
   - Crash protection: `CrashGuard.kt` (3 crashes of the same version within 10 minutes) → `SafeModeActivity.kt` (minimal, system widgets only; do not add dependencies to it).
-    Rollback: `.github/workflows/rollback.yml` (old code + higher version number, republished). Releases wait for the emulator demo to pass.
+    Rollback: `.github/workflows/rollback.yml` (old code + higher version number, republished). Releases wait for the build, lint and tests to pass.
   - **Backward-compatible data**: SharedPreferences / config.json only gain fields and never change the meaning of existing ones; to change a format, use a new key (e.g. `dock_v2`)
     and keep reading the old key, so settings still work after rolling back to an older version.
   - Signing: the owner's private key, not in the repository. CI decodes it from Secrets `Q5HOME_KEYSTORE` (base64) / `Q5HOME_KEYSTORE_PASSWORD`;

@@ -1,0 +1,48 @@
+// Fake apps for CI screen recordings only: they mimic ZLINK and the OEM app to verify the launcher detects and opens them. Do not install on the head unit.
+plugins {
+    id 'com.android.application'
+    id 'org.jetbrains.kotlin.android'
+}
+
+android {
+    namespace 'com.x0finch.fake'
+    compileSdk 34
+
+    defaultConfig {
+        minSdk 26
+        targetSdk 34
+        versionCode 1
+        versionName '1.0'
+    }
+
+    flavorDimensions = ['app']
+    productFlavors {
+        zlink {
+            dimension 'app'
+            applicationId 'com.zjinnova.zlink'
+            resValue 'string', 'fake_label', 'ZLINK'
+            resValue 'string', 'fake_title', 'ZLINK（模拟）'
+        }
+        oem {
+            dimension 'app'
+            applicationId 'com.wy.oem'
+            resValue 'string', 'fake_label', '原车'
+            resValue 'string', 'fake_title', '原车 MMI 画面（模拟）'
+        }
+    }
+
+    buildTypes {
+        release {
+            signingConfig signingConfigs.debug
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    kotlinOptions {
+        jvmTarget = '17'
+    }
+}

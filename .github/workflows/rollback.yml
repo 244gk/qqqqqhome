@@ -1,0 +1,93 @@
+name: rollback
+
+# Rollback release: when a new version misbehaves on the head unit, open GitHub → Actions → rollback → Run workflow on your phone
+# and enter the version to roll back to (e.g. 1.0.12). CI rebuilds that version's code but gives it a higher version number
+# (1.0.<current commit count>.<n>) and publishes it as the latest Release; the head unit's "check for updates" installs it as a normal update.
+# Android won't install a package with a lower version code over a newer one, so this works around that.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to roll back to (e.g. 1.0.12)'
+        required: true
+
+jobs:
+  rollback:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      TARGET: ${{ inputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Work out the rollback version
+        id: v
+        run: |
+          set -euo pipefail
+          tag="v${TARGET#v}"
+          if ! git rev-parse -q --verify "refs/tags/$tag" > /dev/null; then
+            echo "::error::Version $tag not found (check the existing versions on the Releases page)"
+            exit 1
+          fi
+          count=$(( $(git show origin/main:version-base 2>/dev/null || echo 0) + $(git rev-list --count origin/main) ))
+          n=1
+          while git rev-parse -q --verify "refs/tags/v1.0.$count.$n" > /dev/null; do n=$((n + 1)); done
+          if [ "$n" -gt 9 ]; then echo "::error::A version can be rolled back to at most 9 times; push to main first"; exit 1; fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "sha=$(git rev-parse "$tag^{commit}")" >> "$GITHUB_OUTPUT"
+          echo "name=1.0.$count.$n" >> "$GITHUB_OUTPUT"
+          echo "code=$((count * 10 + n))" >> "$GITHUB_OUTPUT"
+          git checkout --quiet "$tag"
+          # Versions from before the switch to the private signing key (signed with the public key in the repo) can't be installed, so they can't be rollback targets.
+          if ! grep -q "Q5HOME_KEYSTORE_FILE" launcher/app/build.gradle; then
+            echo "::error::$tag predates the signing key change; rebuilding it would produce a different signature that the head unit can't install. Pick a newer version."
+            exit 1
+          fi
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Decode signing key
+        env:
+          KEYSTORE_B64: ${{ secrets.Q5HOME_KEYSTORE }}
+          KEYSTORE_PASSWORD: ${{ secrets.Q5HOME_KEYSTORE_PASSWORD }}
+        run: |
+          if [ -z "$KEYSTORE_B64" ] || [ -z "$KEYSTORE_PASSWORD" ]; then
+            echo "::error::Missing signing key (Secrets: Q5HOME_KEYSTORE / Q5HOME_KEYSTORE_PASSWORD)"
+            exit 1
+          fi
+          echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/q5home.keystore"
+          echo "Q5HOME_KEYSTORE_FILE=$RUNNER_TEMP/q5home.keystore" >> "$GITHUB_ENV"
+          echo "Q5HOME_KEYSTORE_PASSWORD=$KEYSTORE_PASSWORD" >> "$GITHUB_ENV"
+
+      - name: Build the old version with a new version number
+        working-directory: launcher
+        env:
+          VERSION_CODE: ${{ steps.v.outputs.code }}
+          VERSION_NAME: ${{ steps.v.outputs.name }}
+        run: ./gradlew --no-daemon :app:assembleRelease :app:testDebugUnitTest
+
+      - name: Name the APK, write release notes
+        run: |
+          mv launcher/app/build/outputs/apk/release/app-release.apk "q5home-${{ steps.v.outputs.name }}.apk"
+          cp "q5home-${{ steps.v.outputs.name }}.apk" q5home.apk
+          printf '回退：内容与 %s 相同。\n\n' "${{ steps.v.outputs.tag }}" > notes.md
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.v.outputs.name }}
+          target_commitish: ${{ steps.v.outputs.sha }}
+          name: Q5 Home ${{ steps.v.outputs.name }}（回退到 ${{ steps.v.outputs.tag }}）
+          body_path: notes.md
+          files: |
+            q5home-${{ steps.v.outputs.name }}.apk
+            q5home.apk
+          make_latest: true

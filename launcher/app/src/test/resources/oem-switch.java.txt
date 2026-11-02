@@ -1,0 +1,18 @@
+package com.wwc2.fake;
+
+import java.util.Map;
+
+/** For tests: simulates the code in the factory launcher that switches to the OEM screen (DexScan must pick out this method and list its calls). */
+public class OemSwitch {
+    static Object sink;
+
+    public static void enterOriginalMedia(Map<String, Object> values) {
+        values.put("original_screen", 1);
+        sink = "content://com.wwc2.canmcusdk.CanbusProvider/original_screen";
+        System.out.println("enter_original_media");
+    }
+
+    public static void unrelated() {
+        System.out.println("hello");
+    }
+}

@@ -1,0 +1,173 @@
+name: launcher
+
+on:
+  push:
+    paths:
+      - 'launcher/**'
+      - 'ci/**'
+      - '.github/workflows/launcher.yml'
+  workflow_dispatch:
+
+jobs:
+  # Build the APK, lint, unit tests + multi-resolution screenshots
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: launcher
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # version = version-base + commit count, needs full history
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+
+      # The signing key comes from GitHub Secrets (Q5HOME_KEYSTORE is the base64-encoded keystore). On main, fail without a key
+      # so we never publish with the wrong signature; other branches fall back to a temporary debug signature, for testing only.
+      - name: Decode signing key
+        env:
+          KEYSTORE_B64: ${{ secrets.Q5HOME_KEYSTORE }}
+          KEYSTORE_PASSWORD: ${{ secrets.Q5HOME_KEYSTORE_PASSWORD }}
+        run: |
+          if [ -z "$KEYSTORE_B64" ] || [ -z "$KEYSTORE_PASSWORD" ]; then
+            if [ "$GITHUB_REF" = "refs/heads/main" ]; then
+              echo "::error::Missing signing key (Secrets: Q5HOME_KEYSTORE / Q5HOME_KEYSTORE_PASSWORD); cannot build a release on main"
+              exit 1
+            fi
+            echo "::warning::No signing key, using a temporary debug signature (cannot be installed over official releases)"
+            exit 0
+          fi
+          echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/q5home.keystore"
+          echo "Q5HOME_KEYSTORE_FILE=$RUNNER_TEMP/q5home.keystore" >> "$GITHUB_ENV"
+          echo "Q5HOME_KEYSTORE_PASSWORD=$KEYSTORE_PASSWORD" >> "$GITHUB_ENV"
+
+      - name: Build, lint, test
+        run: ./gradlew --no-daemon :app:assembleRelease :app:lintRelease :app:testDebugUnitTest :fakeapps:assembleRelease
+
+      # Verify: the APK's signing certificate must match the private key (so a misconfiguration can't silently use another signature).
+      - name: Check APK signature
+        run: |
+          apksigner=$(ls "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -1)
+          apk_fp=$("$apksigner" verify --print-certs app/build/outputs/apk/release/app-release.apk \
+            | grep -m1 'SHA-256 digest' | awk '{print $NF}')
+          echo "APK signing certificate SHA-256: $apk_fp"
+          if [ -n "${Q5HOME_KEYSTORE_FILE:-}" ]; then
+            key_fp=$(keytool -list -v -keystore "$Q5HOME_KEYSTORE_FILE" -storepass "$Q5HOME_KEYSTORE_PASSWORD" -alias q5home \
+              | grep -m1 'SHA256:' | sed 's/.*SHA256: //; s/://g' | tr 'A-F' 'a-f')
+            if [ "$apk_fp" != "$key_fp" ]; then
+              echo "::error::APK signature does not match the private key (the key alias must be q5home)"
+              exit 1
+            fi
+            echo "✅ Signed with the private key"
+          fi
+
+      - id: version
+        run: echo "version=1.0.$(( $(cat version-base) + $(git rev-list --count HEAD) ))" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: q5home-apk
+          path: launcher/app/build/outputs/apk/release/app-release.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: fakeapps-apk
+          path: launcher/fakeapps/build/outputs/apk/*/release/*.apk
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: screenshots
+          path: launcher/app/build/screenshots/
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-reports
+          path: |
+            launcher/app/build/reports/tests/
+            launcher/app/build/reports/lint-results-release.html
+
+  # Tap through the app on an Android 12 emulator (1920x720, a common head-unit ratio): screenshots + a recording with captions and tap rings
+  emulator-demo:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: q5home-apk
+          path: apk
+      - uses: actions/download-artifact@v4
+        with:
+          name: fakeapps-apk
+          path: fakeapps
+
+      # Pillow: marks tap positions on screenshots and draws rings; OpenCV: decodes the QR code on the recon page; ffmpeg + CJK fonts: video post-processing.
+      - name: Install Pillow, ffmpeg, CJK font
+        run: |
+          pip install --quiet pillow opencv-python-headless
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg fonts-noto-cjk > /dev/null
+
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Run demo on emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 31
+          target: default
+          arch: x86_64
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -skin 1920x720
+          script: python3 ci/demo.py --launcher apk/app-release.apk --fake fakeapps/zlink/release/fakeapps-zlink-release.apk --fake fakeapps/oem/release/fakeapps-oem-release.apk --out demo-out
+
+      # Add a caption strip below the video and rings at taps / long presses; the raw recording is kept as demo-raw.mp4.
+      - name: Render demo video
+        if: always()
+        run: python3 ci/render_video.py demo-out
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: emulator-demo
+          path: demo-out/
+
+  # Push to main: publish a GitHub Release (the head unit's "check for updates" reads from here).
+  # The emulator demo must pass too (a launcher crash fails the demo), so crashing builds never reach the head unit.
+  release:
+    needs: [build, emulator-demo]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: q5home-apk
+          path: apk
+      - name: Name the APK, write release notes
+        run: |
+          mv apk/app-release.apk "apk/q5home-${{ needs.build.outputs.version }}.apk"
+          # Copy with a fixed file name: the README's "download latest" link releases/latest/download/q5home.apk always points to it.
+          cp "apk/q5home-${{ needs.build.outputs.version }}.apk" apk/q5home.apk
+          # Release notes = commit message (minus attribution lines), shown on the head unit's "version update" page.
+          git log -1 --format=%B | grep -v -E '^Co-Authored-By:' > notes.md
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ needs.build.outputs.version }}
+          target_commitish: ${{ github.sha }}
+          name: Q5 Home ${{ needs.build.outputs.version }}
+          body_path: notes.md
+          files: |
+            apk/q5home-${{ needs.build.outputs.version }}.apk
+            apk/q5home.apk
+          make_latest: true

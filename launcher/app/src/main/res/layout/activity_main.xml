@@ -1,0 +1,291 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Home screen = Bento dashboard: a solid-color page filled with cards.
+  Top row: clock card | GPS card (speed + sunrise/sunset arc) | large CarPlay card (the square on the left is the current wallpaper).
+  Bottom row: app tiles (OEM, favorite apps, add, all apps, launcher settings); scrolls horizontally when there are more.
+  The wallpaper is shown in full only in the CarPlay card; the page background shows just a faint hint of it.
+-->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent">
+
+    <!-- A very faint wallpaper layer in the page background (with a theme-color layer on top). -->
+    <ImageView
+        android:id="@+id/wallpaper"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:scaleType="centerCrop"
+        android:importantForAccessibility="no" />
+
+    <View
+        android:id="@+id/scrim"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:importantForAccessibility="no" />
+
+    <!-- Photographer credit for online wallpapers (required by Unsplash). -->
+    <TextView
+        android:id="@+id/credit"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom|end"
+        android:layout_marginEnd="24dp"
+        android:layout_marginBottom="3dp"
+        android:singleLine="true"
+        android:textSize="10sp"
+        android:fontFamily="@font/outfit_regular"
+        android:visibility="gone" />
+
+    <LinearLayout
+        android:id="@+id/grid"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:orientation="vertical"
+        android:paddingStart="24dp"
+        android:paddingEnd="24dp"
+        android:paddingTop="20dp"
+        android:paddingBottom="22dp">
+
+        <LinearLayout
+            android:id="@+id/topRow"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1.2"
+            android:orientation="horizontal">
+
+            <!-- Clock card (not clickable: swiping on it also scrolls the bottom row). -->
+            <LinearLayout
+                android:id="@+id/clockCard"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:orientation="vertical"
+                android:padding="20dp">
+
+                <TextView
+                    android:id="@+id/greeting"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:singleLine="true"
+                    android:textSize="11sp"
+                    android:fontFamily="@font/outfit_medium"
+                    android:letterSpacing="0.16"
+                    android:textAllCaps="true" />
+
+                <Space
+                    android:layout_width="match_parent"
+                    android:layout_height="0dp"
+                    android:layout_weight="1" />
+
+                <TextClock
+                    android:id="@+id/clock"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:format12Hour="HH:mm"
+                    android:format24Hour="HH:mm"
+                    android:textSize="64sp"
+                    android:fontFamily="@font/outfit_light"
+                    android:letterSpacing="-0.04"
+                    android:includeFontPadding="false" />
+
+                <!-- The date is always shown in Chinese regardless of system language (the head unit may run an English system). -->
+                <TextView
+                    android:id="@+id/date"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="6dp"
+                    android:singleLine="true"
+                    android:textSize="14sp"
+                    android:fontFamily="@font/outfit_regular"
+                    android:letterSpacing="0.04" />
+
+                <!-- Shown when a new version is available; tapping opens the "版本更新" (Updates) settings page. -->
+                <TextView
+                    android:id="@+id/pillUpdate"
+                    android:layout_width="wrap_content"
+                    android:layout_height="30dp"
+                    android:layout_marginTop="10dp"
+                    android:gravity="center"
+                    android:paddingStart="14dp"
+                    android:paddingEnd="14dp"
+                    android:singleLine="true"
+                    android:textSize="12sp"
+                    android:fontFamily="@font/outfit_medium"
+                    android:focusable="true"
+                    android:clickable="true"
+                    android:visibility="gone" />
+            </LinearLayout>
+
+            <!-- GPS card: large speed, heading / altitude, sunrise/sunset arc (not clickable). -->
+            <LinearLayout
+                android:id="@+id/gpsCard"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:layout_marginStart="16dp"
+                android:orientation="vertical"
+                android:padding="20dp">
+
+                <TextView
+                    android:id="@+id/gpsLabel"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:singleLine="true"
+                    android:textSize="11sp"
+                    android:fontFamily="@font/outfit_medium"
+                    android:letterSpacing="0.16"
+                    android:textAllCaps="true" />
+
+                <LinearLayout
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:orientation="horizontal">
+
+                    <TextView
+                        android:id="@+id/speed"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:singleLine="true"
+                        android:textSize="40sp"
+                        android:fontFamily="@font/outfit_light"
+                        android:letterSpacing="-0.03"
+                        android:includeFontPadding="false" />
+
+                    <TextView
+                        android:id="@+id/speedUnit"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_gravity="bottom"
+                        android:layout_marginStart="6dp"
+                        android:layout_marginBottom="4dp"
+                        android:singleLine="true"
+                        android:text="km/h"
+                        android:textSize="13sp"
+                        android:fontFamily="@font/outfit_regular" />
+                </LinearLayout>
+
+                <!-- Heading · altitude; a hint text when there is no fix. -->
+                <TextView
+                    android:id="@+id/trip"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:singleLine="true"
+                    android:ellipsize="end"
+                    android:textSize="13sp"
+                    android:fontFamily="@font/outfit_regular" />
+
+                <FrameLayout
+                    android:id="@+id/sunHolder"
+                    android:layout_width="match_parent"
+                    android:layout_height="0dp"
+                    android:layout_weight="1"
+                    android:layout_marginTop="6dp" />
+            </LinearLayout>
+
+            <!-- Large CarPlay card: the square on the left is the current wallpaper (like a music card's cover art). -->
+            <LinearLayout
+                android:id="@+id/firstTile"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="2"
+                android:layout_marginStart="16dp"
+                android:orientation="horizontal"
+                android:padding="14dp"
+                android:focusable="true"
+                android:clickable="true"
+                android:focusedByDefault="true">
+
+                <ImageView
+                    android:id="@+id/art"
+                    android:layout_width="wrap_content"
+                    android:layout_height="match_parent"
+                    android:adjustViewBounds="false"
+                    android:scaleType="centerCrop"
+                    android:importantForAccessibility="no" />
+
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="match_parent"
+                    android:layout_weight="1"
+                    android:layout_marginStart="20dp"
+                    android:paddingTop="6dp"
+                    android:paddingBottom="4dp"
+                    android:paddingEnd="6dp"
+                    android:orientation="vertical">
+
+                    <TextView
+                        android:id="@+id/carplayLabel"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:singleLine="true"
+                        android:textSize="11sp"
+                        android:fontFamily="@font/outfit_medium"
+                        android:letterSpacing="0.16"
+                        android:textAllCaps="true" />
+
+                    <Space
+                        android:layout_width="match_parent"
+                        android:layout_height="0dp"
+                        android:layout_weight="1" />
+
+                    <TextView
+                        android:id="@+id/carplayTitle"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:singleLine="true"
+                        android:text="@string/carplay"
+                        android:textSize="34sp"
+                        android:fontFamily="@font/outfit_light"
+                        android:letterSpacing="-0.02"
+                        android:includeFontPadding="false" />
+
+                    <TextView
+                        android:id="@+id/carplaySub"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="6dp"
+                        android:singleLine="true"
+                        android:ellipsize="end"
+                        android:textSize="13sp"
+                        android:fontFamily="@font/outfit_regular" />
+
+                    <Space
+                        android:layout_width="match_parent"
+                        android:layout_height="0dp"
+                        android:layout_weight="1" />
+
+                    <!-- Enter button: circular, dark background + arrow. -->
+                    <ImageView
+                        android:id="@+id/carplayGo"
+                        android:layout_width="48dp"
+                        android:layout_height="48dp"
+                        android:layout_gravity="end"
+                        android:padding="13dp"
+                        android:src="@drawable/ui_right"
+                        android:importantForAccessibility="no" />
+                </LinearLayout>
+            </LinearLayout>
+        </LinearLayout>
+
+        <!-- Bottom row: app tiles. -->
+        <HorizontalScrollView
+            android:id="@+id/tileScroll"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:layout_marginTop="16dp"
+            android:scrollbars="none"
+            android:overScrollMode="never"
+            android:fillViewport="true">
+
+            <LinearLayout
+                android:id="@+id/tiles"
+                android:layout_width="wrap_content"
+                android:layout_height="match_parent"
+                android:orientation="horizontal" />
+        </HorizontalScrollView>
+    </LinearLayout>
+</FrameLayout>

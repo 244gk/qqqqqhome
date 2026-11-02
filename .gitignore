@@ -1,0 +1,7 @@
+# Head-unit recon output, contains device info such as serial numbers
+recon/
+backups/
+.DS_Store
+__pycache__/
+demo-out/
+.review/

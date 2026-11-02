@@ -1,0 +1,42 @@
+name: wallpapers
+
+# Appends a few new Unsplash wallpapers to wallpapers/feed.json every day; the head unit downloads them when on Wi-Fi (see OnlineWallpapers.kt).
+# Needs the repo secret UNSPLASH_ACCESS_KEY (the Access Key from the Unsplash developer dashboard); skipped without failing if it is not set.
+# Only changes feed.json, so it does not trigger the launcher workflow or publish a new release.
+on:
+  schedule:
+    - cron: '47 19 * * *' # once a day (19:47 UTC)
+  workflow_dispatch:
+    inputs:
+      count:
+        description: 'How many photos to add this run'
+        default: '3'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: wallpapers
+  cancel-in-progress: false
+
+jobs:
+  update-feed:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - id: feed
+        env:
+          UNSPLASH_ACCESS_KEY: ${{ secrets.UNSPLASH_ACCESS_KEY }}
+        run: python3 wallpapers/update_feed.py --count "${{ github.event.inputs.count || '3' }}"
+
+      - name: Commit
+        if: steps.feed.outputs.added != '' && steps.feed.outputs.added != '0'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add wallpapers/feed.json
+          git commit -m "Wallpaper feed: add ${{ steps.feed.outputs.added }} new Unsplash photos"
+          git push origin HEAD:main

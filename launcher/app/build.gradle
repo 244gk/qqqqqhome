@@ -1,0 +1,88 @@
+plugins {
+    id 'com.android.application'
+    id 'org.jetbrains.kotlin.android'
+}
+
+// Versioning: build number = root version-base + commit count; versionName = 1.0.<number>, versionCode = number × 10 (only ever increases).
+// version-base ensures that after switching repos or rewriting history, new versions are still higher than what's installed on the head unit (Android can't downgrade).
+// A "rollback release" rebuilds old code with version code = current number × 10 + 1~9 (versionName 1.0.<number>.<n>),
+// passed in by the rollback workflow via the VERSION_CODE / VERSION_NAME env vars, so the head unit installs it as a normal update.
+def versionBase = {
+    def f = rootProject.file('../version-base')
+    return f.exists() ? f.text.trim().toInteger() : 0
+}()
+def commitCount = versionBase + {
+    try {
+        return providers.exec { commandLine 'git', 'rev-list', '--count', 'HEAD' }
+            .standardOutput.asText.get().trim().toInteger()
+    } catch (Exception ignored) {
+        return 1
+    }
+}()
+
+android {
+    namespace 'com.x0finch.q5home'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId 'com.x0finch.q5home'
+        minSdk 26
+        targetSdk 34
+        versionCode((System.getenv('VERSION_CODE') ?: "${commitCount * 10}").toInteger())
+        versionName System.getenv('VERSION_NAME') ?: "1.0.$commitCount"
+    }
+
+    // Signing: uses the owner's private key (not in the repo) so new versions can install over old ones.
+    //  - Local: put Q5HOME_KEYSTORE=<keystore path> and Q5HOME_KEYSTORE_PASSWORD=<password> in ~/.gradle/gradle.properties
+    //  - CI: a file decoded from GitHub Secrets, path in env var Q5HOME_KEYSTORE_FILE, password in Q5HOME_KEYSTORE_PASSWORD
+    // Without either, a temporary debug signature is used: fine for local testing, but it can't install over release builds (CI on main refuses to build).
+    def keystorePath = System.getenv('Q5HOME_KEYSTORE_FILE') ?: findProperty('Q5HOME_KEYSTORE')
+    def keystorePassword = System.getenv('Q5HOME_KEYSTORE_PASSWORD') ?: findProperty('Q5HOME_KEYSTORE_PASSWORD')
+    def hasReleaseKey = keystorePath && keystorePassword && file(keystorePath).isFile()
+    signingConfigs {
+        if (hasReleaseKey) {
+            q5home {
+                storeFile file(keystorePath)
+                storePassword keystorePassword
+                keyAlias 'q5home'
+                keyPassword keystorePassword
+            }
+        }
+    }
+
+    buildTypes {
+        debug {
+            signingConfig hasReleaseKey ? signingConfigs.q5home : signingConfigs.debug
+        }
+        release {
+            minifyEnabled true
+            shrinkResources true
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+            signingConfig hasReleaseKey ? signingConfigs.q5home : signingConfigs.debug
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    testOptions {
+        unitTests.includeAndroidResources = true
+        unitTests.all {
+            // Output directory for screenshot tests; CI uploads it.
+            systemProperty 'screenshots.dir', layout.buildDirectory.dir('screenshots').get().asFile.path
+        }
+    }
+
+    kotlinOptions {
+        jvmTarget = '17'
+    }
+}
+
+dependencies {
+    // Test-only, not included in the APK.
+    testImplementation 'junit:junit:4.13.2'
+    testImplementation 'org.robolectric:robolectric:4.14.1'
+    testImplementation 'androidx.test:core:1.6.1'
+}

@@ -64,7 +64,8 @@ jobs:
           fi
 
       - id: version
-        run: echo "version=1.0.$(( $(cat version-base) + $(git rev-list --count HEAD) ))" >> "$GITHUB_OUTPUT"
+        # Steps run in launcher/ (defaults.run.working-directory), so version-base is one level up; must match app/build.gradle.
+        run: echo "version=1.0.$(( $(cat ../version-base) + $(git rev-list --count HEAD) ))" >> "$GITHUB_OUTPUT"
 
       - uses: actions/upload-artifact@v4
         with:

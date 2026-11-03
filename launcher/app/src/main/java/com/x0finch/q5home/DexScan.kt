@@ -33,28 +33,31 @@ object DexScan {
      * only fill tables (see [constantsApk]) and would crowd out the real code.
      */
     fun scanApk(apk: File, target: (String) -> Boolean, maxMethods: Int = 15, maxEvents: Int = 60,
-                refs: (String) -> Boolean = { false }): List<Method> {
+                refs: (String) -> Boolean = { false }, owner: (String) -> Boolean = { true }): List<Method> {
         val out = mutableListOf<Method>()
-        eachDex(apk) { bytes -> if (out.size < maxMethods) out += scanDex(bytes, target, maxMethods - out.size, maxEvents, refs) }
+        eachDex(apk) { bytes -> if (out.size < maxMethods) out += scanDex(bytes, target, maxMethods - out.size, maxEvents, refs, owner) }
         return out
     }
 
     /** A broken / truncated dex doesn't crash: returns what was found so far. */
+    /** [owner] gets each method's "Class.method" name: only methods it accepts are scanned (e.g. vendor code, not bundled libraries). */
     fun scanDex(dex: ByteArray, target: (String) -> Boolean, maxMethods: Int = 15, maxEvents: Int = 60,
-                refs: (String) -> Boolean = { false }): List<Method> {
+                refs: (String) -> Boolean = { false }, owner: (String) -> Boolean = { true }): List<Method> {
         val found = mutableListOf<Method>()
-        runCatching { scan(dex, target, refs, maxMethods, maxEvents, found) }
+        runCatching { scan(dex, target, refs, owner, maxMethods, maxEvents, found) }
         return found
     }
 
-    fun sitesApk(apk: File, call: (String) -> Boolean, max: Int = 30): List<Site> {
+    fun sitesApk(apk: File, call: (String) -> Boolean, max: Int = 30, owner: (String) -> Boolean = { true },
+                 maxStrings: Int = 15): List<Site> {
         val out = mutableListOf<Site>()
-        eachDex(apk) { bytes -> if (out.size < max) out += sitesDex(bytes, call, max - out.size) }
+        eachDex(apk) { bytes -> if (out.size < max) out += sitesDex(bytes, call, max - out.size, owner, maxStrings) }
         return out
     }
 
     /** Methods that call a method whose "Class.name" matches [call]; with up to 15 distinct strings each. */
-    fun sitesDex(dex: ByteArray, call: (String) -> Boolean, max: Int = 30): List<Site> {
+    fun sitesDex(dex: ByteArray, call: (String) -> Boolean, max: Int = 30, owner: (String) -> Boolean = { true },
+                 maxStrings: Int = 15): List<Site> {
         val found = mutableListOf<Site>()
         runCatching {
             val d = Dex(dex)
@@ -63,8 +66,8 @@ object DexScan {
             if (wanted.isEmpty()) return@runCatching
             d.eachMethod { methodIdx, insns ->
                 val calls = insns.filter { it.op in INVOKE && it.index in wanted }
-                if (calls.isEmpty()) return@eachMethod true
-                val strings = insns.filter { it.op in CONST_STRING }.map { d.string(it.index).take(100) }.distinct().take(15)
+                if (calls.isEmpty() || !owner(d.methodName(methodIdx))) return@eachMethod true
+                val strings = insns.filter { it.op in CONST_STRING }.map { d.string(it.index).take(100) }.distinct().take(maxStrings)
                 found += Site(d.methodName(methodIdx), calls.map { d.methodName(it.index) }.distinct(), strings)
                 found.size < max
             }
@@ -110,8 +113,8 @@ object DexScan {
         }
     }
 
-    private fun scan(dex: ByteArray, target: (String) -> Boolean, refs: (String) -> Boolean, maxMethods: Int, maxEvents: Int,
-                     found: MutableList<Method>) {
+    private fun scan(dex: ByteArray, target: (String) -> Boolean, refs: (String) -> Boolean, owner: (String) -> Boolean,
+                     maxMethods: Int, maxEvents: Int, found: MutableList<Method>) {
         val d = Dex(dex)
         if (!d.valid) return
         val wanted = (0 until d.stringCount).filter { target(d.string(it)) }.toHashSet()
@@ -119,7 +122,7 @@ object DexScan {
         val wantedFields = (0 until d.fieldCount).filter { refs(d.fieldName(it)) }.toHashSet()
         if (wanted.isEmpty() && wantedMethods.isEmpty() && wantedFields.isEmpty()) return
         d.eachMethod { methodIdx, insns ->
-            if (d.methodSimpleName(methodIdx) == "<clinit>") return@eachMethod true
+            if (d.methodSimpleName(methodIdx) == "<clinit>" || !owner(d.methodName(methodIdx))) return@eachMethod true
             val hit = methodIdx in wantedMethods || insns.any {
                 (it.op in CONST_STRING && it.index in wanted) || (it.op in INVOKE && it.index in wantedMethods) ||
                     (it.op in FIELD && it.index in wantedFields)

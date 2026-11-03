@@ -39,27 +39,44 @@ object Recon {
     }
 
     /**
-     * The one recon report: only what is NEW compared with [known] (earlier reports) —
-     *  1. changes: system build, vendor apps added / removed / updated (their components and code strings, minus known strings);
-     *  2. GPS fix line;
-     *  3. the background event log since [eventsSinceMs] (known noise from [ReconKnown.ignoreEvents] only counted);
-     *  4. read-only static analysis of [ReconTargets.packages]: matching methods (minus known ones), broadcast / page-start
-     *     call sites, constant tables, native libraries, property and settings values, provider reads (known query results skipped).
+     * The one recon report: only what is NEW compared with [known] (earlier reports). [staticPart] is the slow code analysis
+     * ([staticSections], prepared in the background by [ReconReport]); everything else is read now (cheap):
+     * changes, vehicle data, the event log since [eventsSinceMs], properties, settings and provider reads.
      */
-    fun report(context: Context, targets: ReconTargets, known: ReconKnown, eventsSinceMs: Long?, nowMs: Long = System.currentTimeMillis()): Report {
-        val pm = context.packageManager
+    fun report(context: Context, targets: ReconTargets, known: ReconKnown, eventsSinceMs: Long?,
+               nowMs: Long = System.currentTimeMillis(), staticPart: String? = null): Report {
         val md = StringBuilder()
         val now = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.US).format(Date(nowMs))
-        fun info(pkg: String) = runCatching { pm.getPackageInfo(pkg, 0) }.getOrNull()
-        val self = info(context.packageName)?.versionName ?: "?"
-
-        md.appendLine("<!-- q5home-recon v3 -->")
+        val self = runCatching { context.packageManager.getPackageInfo(context.packageName, 0).versionName }.getOrNull() ?: "?"
+        md.appendLine("<!-- q5home-recon v4 -->")
         md.appendLine("由 q5home $self 在车上生成（$now），只读，没有改动车机。")
         md.appendLine(if (known.source != null) "只列新内容：之前报告里已经有的（${known.source}）都省略了。"
-            else "**已知列表没下载到**（车机没联网？），下面是全部内容，没有省略已知的。")
+            else "**已知列表没下载到，车机上也没有存过**，下面是全部内容，没有省略已知的。")
         md.appendLine()
+        md.append(liveSections(context, targets, known, eventsSinceMs))
+        md.append(staticPart ?: staticSections(context, targets, known))
+        return Report(md.toString(), "车机摸底 ${Build.MODEL} $now")
+    }
 
-        // ---- 1. Changes ----
+    /** Writes a section of one-line items, leaving out lines already known; says so when nothing is new. */
+    private fun StringBuilder.section(title: String, intro: String?, lines: List<String>, known: ReconKnown, empty: String = "（没有新的）") {
+        appendLine("## $title")
+        intro?.let { appendLine(it) }
+        val fresh = lines.filterNot { known.knows(it) }
+        if (fresh.isEmpty()) appendLine(if (lines.isEmpty()) empty else "（${lines.size} 条都是已知的，省略）")
+        else {
+            fresh.forEach { appendLine(it) }
+            if (fresh.size < lines.size) appendLine("（另有 ${lines.size - fresh.size} 条已知的省略）")
+        }
+        appendLine()
+    }
+
+    /** The cheap parts, read every time the report is shown. */
+    fun liveSections(context: Context, targets: ReconTargets, known: ReconKnown, eventsSinceMs: Long?): String {
+        val pm = context.packageManager
+        val md = StringBuilder()
+
+        // ---- Changes ----
         md.appendLine("## 和上次相比的变化")
         val changes = mutableListOf<String>()
         if (known.system != null && known.system != Build.DISPLAY) changes += "系统版本：${known.system} → ${Build.DISPLAY}"
@@ -83,13 +100,15 @@ object Recon {
         md.appendLine()
         for (p in changed) appInternals(md, pm, p, known.strings)
 
-        // ---- 2. GPS ----
-        md.appendLine("## GPS")
-        SignalCheck(context).gpsLines().forEach { (k, v) -> md.appendLine("- $k：$v") }
-        md.appendLine()
+        // ---- Vehicle data (read-only ContentResolver.call getters, the way the stock launcher reads them) ----
+        if (targets.calls.isNotEmpty()) {
+            md.appendLine("## 车辆数据（只读 call，和原厂主页、液晶仪表的读法一样）")
+            targets.calls.forEach { (uri, method) -> md.appendLine("- `$method`：${callProvider(context, uri, method)}") }
+            md.appendLine()
+        }
 
-        // ---- 3. Event log ----
-        val all = EventLog.lines(context, eventsSinceMs)
+        // ---- Event log ----
+        val all = EventLog.lines(context, eventsSinceMs).sortedBy { EventLog.timeOf(it) ?: 0L }
         val noise = known.ignoreEvents.associateWith { 0 }.toMutableMap()
         val events = all.filter { line ->
             val g = known.ignoreEvents.firstOrNull { it.pattern.containsMatchIn(line) }
@@ -98,8 +117,7 @@ object Recon {
         }
         val since = eventsSinceMs?.let { SimpleDateFormat("MM-dd HH:mm:ss", Locale.US).format(Date(it)) }
         md.appendLine("## 后台事件记录（${if (since != null) "上次复制报告 $since 之后" else "全部"}，${events.size} 条）")
-        md.appendLine("q5home 在后台只听不发。时间是车机时间，精确到毫秒；「启动」= q5home 进程重新启动，之前的空白是没在记录。" +
-            "「前台」= 切到前台的应用和页面（要在系统里给 q5home 开「使用情况访问权限」才有）。")
+        md.appendLine("q5home 在后台只听不发，按时间排序。「启动」= q5home 进程重新启动，之前的空白是没在记录；「前台」= 切到前台的应用和页面。")
         noise.filterValues { it > 0 }.takeIf { it.isNotEmpty() }?.let { n ->
             md.appendLine("已知、省略：" + n.entries.joinToString("；") { "${it.key.name} ${it.value} 条" } + "。")
         }
@@ -113,20 +131,60 @@ object Recon {
         }
         md.appendLine()
 
-        // ---- 4. Static analysis ----
-        val apks = targets.packages.mapNotNull { pkg -> info(pkg)?.applicationInfo?.sourceDir?.let { pkg to File(it) } }
+        // ---- Properties named in vendor code, settings, providers: only values not seen before ----
+        val apks = targets.packages.mapNotNull { pkg ->
+            runCatching { pm.getApplicationInfo(pkg, 0).sourceDir }.getOrNull()?.let { pkg to File(it) }
+        }
+        val propNames = ReconReport.propNames(context, apks)
+        md.section("代码里提到的系统属性（当前值）", null,
+            propNames.map { "- `$it`=${prop(it).ifEmpty { "（空）" }.take(60)}" }, known, "（没找到）")
+
+        targets.settings?.let { pattern ->
+            val rows = mutableListOf<String>()
+            for ((table, uri) in listOf("system" to Settings.System.CONTENT_URI, "global" to Settings.Global.CONTENT_URI,
+                    "secure" to Settings.Secure.CONTENT_URI)) {
+                runCatching {
+                    context.contentResolver.query(uri, arrayOf("name", "value"), null, null, null)?.use { c ->
+                        while (c.moveToNext()) {
+                            val k = c.getString(0) ?: continue
+                            if (pattern.containsMatchIn(k)) rows += "- $table/`$k`=${(c.getString(1) ?: "null").take(60)}"
+                        }
+                    }
+                }
+            }
+            md.section("系统设置当前值（键名匹配 `${pattern.pattern}`）", null, rows.sorted(), known, "（没有匹配的）")
+        }
+
+        if (targets.providers.isNotEmpty()) {
+            md.section("数据接口试读（只读 query + getType）", null, targets.providers.map {
+                "- `$it`：query：${queryProvider(context, it)}；getType：${providerType(context, it)}"
+            }, known)
+        }
+        return md.toString()
+    }
+
+    /** The slow part (reads and disassembles the vendor APKs): prepared in the background by [ReconReport]. */
+    fun staticSections(context: Context, targets: ReconTargets, known: ReconKnown): String {
+        val pm = context.packageManager
+        val md = StringBuilder()
+        val apks = targets.packages.mapNotNull { pkg ->
+            runCatching { pm.getApplicationInfo(pkg, 0).sourceDir }.getOrNull()?.let { pkg to File(it) }
+        }
+        val vendorCode = { name: String -> targets.vendorClasses?.containsMatchIn(name) ?: true }
+
         for (group in targets.code) {
             md.appendLine("## ${group.name}（只读反汇编）")
-            md.appendLine("用到匹配 `${group.pattern.pattern}` 的字符串、调用或字段（或自己就叫这个名字）的方法：" +
-                "按顺序列出字符串（str）、整数（int）、调用（call）、读写字段（get / put）。静态初始化（只是填表）不列，见常量表。")
+            md.appendLine("厂商代码里用到匹配 `${group.pattern.pattern}` 的字符串、调用或字段（或自己就叫这个名字）的方法：" +
+                "按顺序列出字符串（str）、整数（int）、调用（call）、读写字段（get / put）。")
             md.appendLine()
             var any = false
             var skipped = 0
             for ((pkg, apk) in apks) {
                 val match = { s: String -> group.pattern.containsMatchIn(s) }
-                val methods = DexScan.scanApk(apk, match, targets.maxMethods + known.methods.size.coerceAtMost(20), targets.maxEvents, refs = match)
+                val methods = DexScan.scanApk(apk, match, targets.maxMethods + known.methods.size.coerceAtMost(40), targets.maxEvents,
+                    refs = match, owner = vendorCode)
                 val fresh = methods.filter { it.name !in known.methods }.take(targets.maxMethods)
-                skipped += methods.size - methods.count { it.name !in known.methods }
+                skipped += methods.count { it.name in known.methods }
                 if (fresh.isEmpty()) continue
                 any = true
                 md.appendLine("### `$pkg`（${fresh.size} 个方法）")
@@ -136,103 +194,61 @@ object Recon {
                 }
                 md.appendLine()
             }
-            if (!any) md.appendLine("（没有新的）\n") else if (skipped > 0) md.appendLine("（另有 $skipped 个已知方法省略）\n")
+            if (!any) md.appendLine(if (skipped > 0) "（$skipped 个方法都是已知的，省略）\n" else "（没找到）\n")
+            else if (skipped > 0) md.appendLine("（另有 $skipped 个已知方法省略）\n")
         }
 
         for (site in targets.sites) {
-            md.appendLine("## ${site.name}（只读反汇编）")
-            md.appendLine("调用了匹配 `${site.call.pattern}` 的方法的地方，以及这个方法里用到的字符串（广播动作、参数名、包名 / 类名）。")
-            md.appendLine()
-            var any = false
+            val lines = mutableListOf<String>()
             for ((pkg, apk) in apks) {
-                val found = DexScan.sitesApk(apk, { site.call.containsMatchIn(it) }, SITE_LIMIT)
-                if (found.isEmpty()) continue
-                any = true
-                md.appendLine("### `$pkg`（${found.size} 处${if (found.size >= SITE_LIMIT) "，只列前 $SITE_LIMIT 处" else ""}）")
-                found.forEach { f ->
-                    md.appendLine("- `${f.name}` → ${f.calls.joinToString { "`${it.substringAfterLast('.')}`" }}：" +
-                        f.strings.ifEmpty { listOf("（没有字符串）") }.joinToString(" ") { "`$it`" })
+                DexScan.sitesApk(apk, { site.call.containsMatchIn(it) }, SITE_LIMIT, owner = vendorCode).forEach { f ->
+                    lines += "- `$pkg` `${f.name}` → ${f.calls.joinToString { "`${it.substringAfterLast('.')}`" }}：" +
+                        f.strings.ifEmpty { listOf("（没有字符串）") }.joinToString(" ") { "`$it`" }
                 }
-                md.appendLine()
             }
-            if (!any) md.appendLine("（这些应用里没找到）\n")
+            md.section("${site.name}（只读反汇编）", "厂商代码里调用了匹配 `${site.call.pattern}` 的地方，以及用到的字符串（广播动作、参数名、包名 / 类名）。",
+                lines, known, "（没找到）")
         }
 
         targets.constants?.let { pattern ->
-            md.appendLine("## 常量表（类名匹配 `${pattern.pattern}`）")
-            md.appendLine("每个类的静态字段和值；没有值的是在代码里赋值的（比如枚举），只列名字。整数同时给出十六进制。")
-            md.appendLine()
+            val lines = mutableListOf<String>()
             for ((pkg, apk) in apks) {
-                val tables = DexScan.constantsApk(apk, { name ->
-                    LIBRARY_CLASS.none { name.startsWith(it) } && pattern.containsMatchIn(name)
-                })
-                if (tables.isEmpty()) continue
-                md.appendLine("### `$pkg`（${tables.size} 个类）")
-                tables.forEach { t ->
-                    md.appendLine("- `${t.className}`：" + t.fields.joinToString(" · ") { (k, v) -> if (v == null) "`$k`" else "`$k=$v`" })
+                DexScan.constantsApk(apk, { name -> vendorCode(name) && pattern.containsMatchIn(name) }).forEach { t ->
+                    lines += "- `$pkg` `${t.className}`：" + t.fields.joinToString(" · ") { (k, v) -> if (v == null) "`$k`" else "`$k=$v`" }
                 }
-                md.appendLine()
             }
+            md.section("常量表（类名匹配 `${pattern.pattern}`）", "静态字段和值；没有值的是在代码里赋值的（比如枚举）。整数同时给出十六进制。",
+                lines.distinct(), known, "（没找到）")
         }
 
         targets.nativeLibs?.let { pattern ->
-            md.appendLine("## 原生库（只读文件内容，不加载、不运行）")
-            md.appendLine("文件名匹配 `${pattern.pattern}` 的 .so：导出的函数（Java_ 开头的是给 Java 调的入口）和像设备节点、串口、视频源的字符串。")
-            md.appendLine()
-            val libs = nativeLibraries(context, targets.packages, pattern)
-            if (libs.isEmpty()) md.appendLine("（没找到）\n")
-            for ((where, bytes) in libs) {
+            val lines = mutableListOf<String>()
+            for ((where, bytes) in nativeLibraries(context, targets.packages, pattern)) {
                 val r = ElfScan.scan(bytes) ?: continue
-                md.appendLine("### `$where`（${bytes.size / 1024} KB）")
-                md.appendLine("- 导出函数 ${r.exports.size} 个：" + r.exports.joinToString(" ") { "`$it`" }.ifEmpty { "（无）" })
-                md.appendLine("- 字符串：" + r.strings.joinToString(" ") { "`$it`" }.ifEmpty { "（无）" })
-                md.appendLine()
+                lines += "- `$where`（${bytes.size / 1024} KB）导出函数：" + r.exports.joinToString(" ") { "`$it`" }.ifEmpty { "（无）" } +
+                    "；字符串：" + r.strings.joinToString(" ") { "`$it`" }.ifEmpty { "（无）" }
             }
+            md.section("厂商原生库（只读文件内容，不加载、不运行）", null, lines, known, "（没找到）")
         }
 
-        // Property names mentioned in the vendor code, with their current values (the recorder watches these for changes).
-        md.appendLine("## 代码里提到的系统属性（当前值）")
-        val propNames = apks.flatMap { (_, apk) ->
-            ApkStrings.fromApk(apk, limit = 300, filter = { PROP_NAME.matches(it) && !it.endsWith('.') })
-        }.distinct().sorted().take(PROP_LIMIT)
-        if (propNames.isEmpty()) md.appendLine("（没找到）")
-        else md.appendLine(propNames.joinToString(" · ") { "`$it`=${prop(it).ifEmpty { "（空）" }.take(60)}" })
-        md.appendLine()
-
-        targets.settings?.let { pattern ->
-            md.appendLine("## 系统设置当前值（键名匹配 `${pattern.pattern}`）")
-            for ((table, uri) in listOf("system" to Settings.System.CONTENT_URI, "global" to Settings.Global.CONTENT_URI,
-                    "secure" to Settings.Secure.CONTENT_URI)) {
-                val rows = runCatching {
-                    context.contentResolver.query(uri, arrayOf("name", "value"), null, null, null)?.use { c ->
-                        val out = mutableListOf<String>()
-                        while (c.moveToNext()) {
-                            val k = c.getString(0) ?: continue
-                            if (pattern.containsMatchIn(k)) out += "`$k=${(c.getString(1) ?: "null").take(60)}`"
-                        }
-                        out
-                    }
-                }.getOrNull()
-                md.appendLine("- $table：" + when {
-                    rows == null -> "读不了"
-                    rows.isEmpty() -> "（没有匹配的）"
-                    else -> rows.sorted().joinToString(" ")
-                })
+        targets.strings?.let { pattern ->
+            val lines = apks.mapNotNull { (pkg, apk) ->
+                ApkStrings.fromApk(apk, limit = STRING_LIMIT * 8, filter = ApkStrings.matching(pattern))
+                    .filter { it !in known.strings }.take(STRING_LIMIT).takeIf { it.isNotEmpty() }
+                    ?.let { "- `$pkg`：" + it.joinToString(" ") { s -> "`$s`" } }
             }
-            md.appendLine()
+            md.section("新的相关字符串（`${pattern.pattern}`）", null, lines, known, "（没有新的）")
         }
+        return md.toString()
+    }
 
-        if (targets.providers.isNotEmpty()) {
-            md.appendLine("## 数据接口试读（只读 query + getType）")
-            md.appendLine("getType 也是只读的；厂商的 CanbusProvider.getType 会按地址里的参数返回数据。query 结果已知的不再列。")
-            targets.providers.forEach {
-                val q = if (it in known.providers) "" else "query：${queryProvider(context, it)}；"
-                md.appendLine("- `$it`：${q}getType：${providerType(context, it)}")
-            }
-            md.appendLine()
+    /** Read-only ContentResolver.call of a "xxx_info" getter; returns every key and value of the Bundle. Waits at most 3 seconds. */
+    fun callProvider(context: Context, uri: String, method: String): String {
+        if (!ReconTargets.CALL_METHOD.matches(method)) return "不允许的方法"
+        return withTimeout {
+            val b = context.contentResolver.call(android.net.Uri.parse(uri), method, null, null)
+            if (b == null) "返回空" else "${b.size()} 项：" + EventRecorder.extras(b).take(3000)
         }
-
-        return Report(md.toString(), "车机摸底 ${Build.MODEL} $now")
     }
 
     /** All components (including non-exported, marked 🔒) and the vendor-looking code strings of one app, minus [knownStrings]. */
@@ -258,16 +274,14 @@ object Recon {
         md.appendLine()
     }
 
-    private const val SITE_LIMIT = 30
+    private const val SITE_LIMIT = 60
     private const val EVENT_LIMIT = 1500
-    private const val PROP_LIMIT = 150
-    private val PROP_NAME = Regex("^(persist|sys|vendor|debug|ro|init|dev|media|hw)\\.[A-Za-z0-9_.\\-]{2,80}$")
     private val LIBRARY_CLASS = listOf("android.", "androidx.", "java.", "javax.", "kotlin.", "kotlinx.", "com.google.", "okhttp3.", "org.")
     private const val MAX_LIB_BYTES = 16L shl 20
 
     /**
-     * Native libraries of the given apps whose file name matches [pattern]: inside the APK (lib/…/x.so), in the app's extracted
-     * library folder, and in /system/lib and /vendor/lib. Only reads the files; nothing is loaded. At most 12 libraries.
+     * Native libraries of the given apps whose file name matches [pattern]: inside the APK (lib/…/x.so) and in the app's extracted
+     * library folder (not the system's own libraries). Only reads the files; nothing is loaded. At most 12 libraries.
      */
     private fun nativeLibraries(context: Context, packages: List<String>, pattern: Regex): List<Pair<String, ByteArray>> {
         val out = mutableListOf<Pair<String, ByteArray>>()
@@ -288,11 +302,6 @@ object Recon {
                 }
             }
             app.nativeLibraryDir?.let { dir ->
-                File(dir).listFiles().orEmpty().filter { it.length() in 1..MAX_LIB_BYTES }.forEach { f -> add(f.path, f.name) { f.readBytes() } }
-            }
-        }
-        for (dir in listOf("/system/lib", "/vendor/lib", "/system/lib64", "/vendor/lib64")) {
-            runCatching {
                 File(dir).listFiles().orEmpty().filter { it.length() in 1..MAX_LIB_BYTES }.forEach { f -> add(f.path, f.name) { f.readBytes() } }
             }
         }

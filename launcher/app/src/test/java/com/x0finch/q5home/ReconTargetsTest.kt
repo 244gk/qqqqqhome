@@ -64,6 +64,10 @@ class ReconTargetsTest {
         // The recorder's built-in list matches the repo file (change one, change the other).
         assertEquals(k.ignoreEvents.map { it.name to it.pattern.pattern }, ReconKnown.DEFAULT_IGNORE.map { it.name to it.pattern.pattern })
         assertNull(ReconKnown.parse("nope", "t"))
+        // Lines already seen are matched by hash (surrounding spaces don't matter).
+        val seen = ReconKnown.parse("""{"lines":["${ReconKnown.lineHash("- `a` = 1")}"]}""", "t")!!
+        assertTrue(seen.knows("  - `a` = 1 "))
+        assertTrue(!seen.knows("- `a` = 2"))
         TestHttpServer { 404 to ByteArray(0) }.use { s -> assertNull(ReconKnown.load(s.base + "/k.json").source) }
         // Offline: the copy kept from the last download is used.
         val cache = File.createTempFile("known", ".json")

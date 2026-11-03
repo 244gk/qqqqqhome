@@ -40,7 +40,7 @@ object EventRecorder {
     /** Provider change notifications can stream (car_info: 5–20 a second): folded over a longer window. */
     private const val DATA_WINDOW_MS = 10_000L
     private const val MAX_PER_SECOND = 40
-    private const val MAX_ACTIONS = 600
+    private const val MAX_ACTIONS = 1500
     private const val MAX_PROPS = 200
 
     /** System broadcasts that help line things up (power, screen, audio, volume / knob). */
@@ -70,6 +70,8 @@ object EventRecorder {
     }
     private val BUILTIN_PROPS = listOf("sys.usb.state", "sys.usb.config", "sys.boot_completed", "service.adb.tcp.port")
     private val ACTION_LIKE = Regex("^[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z0-9_]+){2,}$")
+    /** Calls whose surrounding strings are broadcast actions: building an IntentFilter / Intent, or sending a broadcast. */
+    private val INTENT_CALLS = Regex("IntentFilter\\.(addAction|<init>)$|Intent\\.(<init>|setAction)$|\\.send(Ordered|Sticky)?Broadcast(AsUser)?$")
     private val PROP_LIKE = Regex("^(persist|sys|vendor|debug|init|dev|media|hw|ctl)\\.[A-Za-z0-9_.\\-]{2,80}$")
 
     @Volatile var running = false; private set
@@ -96,6 +98,8 @@ object EventRecorder {
         val version = runCatching { app.packageManager.getPackageInfo(app.packageName, 0).versionName }.getOrNull() ?: "?"
         reloadKnown(app)
         EventLog.append(app, "启动", "q5home 进程启动（版本 $version，pid ${Process.myPid()}）", now = true)
+        // The head unit (or the ignition) just started: prepare the recon report in the background, ready for the QR code.
+        ReconReport.schedule(app)
         register(app, h, BUILTIN_ACTIONS)
         watchSettings(app, h)
         val providers = watchProviders(app, h)
@@ -110,7 +114,7 @@ object EventRecorder {
         // Reading the vendor APKs takes tens of seconds the first time: done on its own thread so the recorder thread keeps
         // writing events with their real times meanwhile; the result is cached per app version.
         Thread({
-            val found = runCatching { discover(app) }.getOrDefault(emptyList<String>() to emptyList())
+            val found = runCatching { synchronized(ReconReport.HEAVY) { discover(app) } }.getOrDefault(emptyList<String>() to emptyList())
             h.post {
                 val actions = found.first.filter { it !in BUILTIN_ACTIONS && !isIgnored(it) }
                 register(app, h, actions)
@@ -220,6 +224,8 @@ object EventRecorder {
                     override fun onChange(selfChange: Boolean, uri: Uri?) {
                         val text = (uri ?: Uri.parse("content://$a")).toString()
                         log(app, "数据变化", text, key = text)
+                        // Ignition on / off: (re)prepare the report a little later.
+                        if (text.endsWith("/acc_status")) ReconReport.schedule(app)
                     }
                 })
             }
@@ -292,7 +298,7 @@ object EventRecorder {
             .filter { it.packageName.startsWith("com.wwc2.") || it.packageName in ReconTargets.DEFAULT.packages }
             .sortedBy { it.packageName }
         @Suppress("DEPRECATION")
-        val key = infos.joinToString(",") { "${it.packageName}:${it.versionCode}:${it.lastUpdateTime}" }
+        val key = "v2|" + infos.joinToString(",") { "${it.packageName}:${it.versionCode}:${it.lastUpdateTime}" }
         val cache = File(File(app.filesDir, "recon"), "discovered.json")
         runCatching {
             val o = JSONObject(cache.readText())
@@ -308,6 +314,11 @@ object EventRecorder {
             ApkStrings.fromApk(apk, limit = 5000, filter = { s ->
                 s.length <= 100 && (isAction(s) || PROP_LIKE.matches(s))
             }).forEach { s -> if (PROP_LIKE.matches(s) && !s.endsWith('.')) propNames += s else actions += s }
+            // Any dotted name the vendor code puts into an IntentFilter / Intent or broadcasts, whatever its case
+            // (e.g. "wwc2.com.wangyong.car", which switches to the OEM screen, is all lower case).
+            DexScan.sitesApk(apk, { INTENT_CALLS.containsMatchIn(it) }, max = 3000, maxStrings = 40).forEach { site ->
+                site.strings.filterTo(actions) { ACTION_LIKE.matches(it) && it.length <= 100 && !it.startsWith("android.permission.") }
+            }
         }
         val result = actions.take(MAX_ACTIONS) to propNames.take(MAX_PROPS)
         runCatching {

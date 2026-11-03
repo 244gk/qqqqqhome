@@ -7,7 +7,10 @@ CarPlay currently uses ZLINK. The owner connects to the head unit from a Mac ove
 
 **Measured (in-car recon, see `examples/wy20/recon-app-2026-10-30.md`)**: the system claims 12 but is actually **Android 8.1 (API 27)**,
 MT6739, 32-bit armeabi-v7a, platform WWC2 (`com.wwc2.*`). `user` build, not debuggable, no su.
-**No wireless debugging**; USB debugging is on (`sys.usb.state=adb`), so adb must first connect once over a USB cable, then `adb tcpip 5555`.
+**No wireless debugging**; USB debugging is on (`sys.usb.state=adb`), but **the owner cannot connect adb at all**: never plan
+anything that needs adb (no `pm grant`, no logcat, no pushes). Everything must work from the app alone. The head unit's Wi-Fi is
+hard to connect and drops often, so every install is costly: plan recon so one install collects everything, and steer it afterwards
+only through the repo config files.
 Do not rely on API 28+ behavior in code without a compatibility path (minSdk stays 26).
 
 ## Language (must follow)
@@ -145,10 +148,15 @@ Add package names here as they are identified:
     so gaps show. Events known not to matter ("ignoreEvents" in `config/recon-known.json`, built-in copy `ReconKnown.DEFAULT_IGNORE`,
     tests check they match; the copy downloaded with a report replaces it) are never registered or written. It must never send, write or switch anything on the head unit.
     Usage access ("使用情况访问权限"), if the owner turns it on in system settings, adds which app / page came to the front.
+    The report is prepared in the background (`ReconReport`): about 2 minutes after q5home starts or the ignition comes on it
+    downloads both config files (cached on the head unit for when Wi-Fi is down) and runs the slow code analysis, kept in q5home's
+    files and redone only when a config, a vendor app or q5home changes; scanning the QR code then only adds the cheap parts
+    (changes, vehicle data via the read-only `call("xxx_info")` getters, event log, properties, settings, provider reads).
+    Code analysis covers only the vendor's own classes ("vendorClasses"), never bundled libraries.
     **There is exactly one report** (the owner's rule: no focused / full split) and it shows **only what is new**:
     `config/recon-known.json` lists what earlier reports already showed (system build, vendor app versions, disassembled methods,
-    provider query results, code strings, known event noise); it is downloaded when the report is generated and everything in it is
-    left out. **After reading each report, add what it taught us to that file (no release needed).** The report has: changes
+    provider query results, code strings, known event noise, and "lines": hashes of every report line already seen); it is downloaded
+    when the report is prepared and everything in it is left out. **After reading each report, add what it taught us to that file (no release needed).** The report has: changes
     (system, vendor apps added / removed / updated with their components and new strings), GPS, the event log since the owner last
     copied a report (the web page tells the app on copy), and the read-only analysis set by `config/recon-targets.json`
     (same copy built into `ReconTargets.kt`, tests check they match; change the analysis focus there, no release needed).

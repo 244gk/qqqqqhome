@@ -45,6 +45,8 @@ class ReconTest {
                 android.database.MatrixCursor(arrayOf("name", "value")).apply { addRow(arrayOf<Any>("original_screen", 1)) }
             else null
         override fun getType(uri: android.net.Uri): String? = null
+        override fun call(method: String, arg: String?, extras: android.os.Bundle?): android.os.Bundle? =
+            if (method == "car_info") android.os.Bundle().apply { putInt("speed", 42); putIntArray("doors", intArrayOf(0, 1)) } else null
         override fun insert(uri: android.net.Uri, v: android.content.ContentValues?): android.net.Uri? = null
         override fun delete(uri: android.net.Uri, s: String?, a: Array<out String>?) = 0
         override fun update(uri: android.net.Uri, v: android.content.ContentValues?, s: String?, a: Array<out String>?) = 0
@@ -71,13 +73,16 @@ class ReconTest {
         val t0 = 1_762_000_000_000L
         EventLog.append(app, "广播", "com.wwc2.OLD", t0)
         EventLog.append(app, "广播", "android.intent.action.SIG_STR · x=1", t0 + 20_000)
+        EventLog.append(app, "广播", "com.wwc2.LATE", t0 + 40_000)
         EventLog.append(app, "广播", "com.wwc2.APK_TO_MAIN · cmd=7", t0 + 30_000)
         val targets = ReconTargets.parse("""{"packages":["com.wwc2.main","com.wwc2.canmcusdk"],
             "code":[{"name":"原车画面切换","pattern":"original_screen|switchOriginalMenu"}],
             "strings":"original|ACTION_SWITCH",
             "providers":["content://com.wwc2.canmcusdk.CanbusProvider/original_screen","content://com.wwc2.canmcusdk.CanbusProvider/car_info"],
+            "calls":["content://com.wwc2.canmcusdk.CanbusProvider/car_info#car_info","content://com.wwc2.canmcusdk.CanbusProvider/x#write_all"],
+            "vendorClasses":"^com\\.wwc2\\.","settings":"zzz_none",
             "sites":[{"name":"发广播的地方","call":"\\.sendBroadcast$"}],
-            "constants":"AvinInterface","settings":"zzz_none"}""", "测试")!!
+            "constants":"AvinInterface"}""", "测试")!!
         val known = ReconKnown.parse("""{"system":"${android.os.Build.DISPLAY}",
             "versions":{"com.wwc2.main":"1.0","com.wy.same":"1.0","com.wwc2.canmcusdk":"0.9","com.wy.gone":"2.0"},
             "methods":["com.wwc2.fake.OemSwitch.enterOriginalMedia"],
@@ -99,12 +104,18 @@ class ReconTest {
         assertTrue(!md.contains("- `com.wwc2.fake.OemSwitch.enterOriginalMedia`"))
         assertTrue(md.contains("- `com.wwc2.fake.Tap.onOriginalClick`"))
         assertTrue(md.contains("（另有 1 个已知方法省略）"))
-        assertTrue(md.contains("- `com.wwc2.fake.Tap.onOriginalClick` → `sendBroadcast`：`com.wwc2.main.ACTION_SWITCH_SOURCE` `source`"))
+        assertTrue(md.contains("- `com.wwc2.canmcusdk` `com.wwc2.fake.Tap.onOriginalClick` → `sendBroadcast`：`com.wwc2.main.ACTION_SWITCH_SOURCE` `source`"))
         assertTrue(md.contains("`SWITCH_ORIGINAL=33 (0x21)`"))
         // Known strings and known provider query results are not repeated; getType is always tried.
         assertTrue(!md.contains("`enter_original_media`"))
         assertTrue(md, md.contains("`content://com.wwc2.canmcusdk.CanbusProvider/original_screen`：query：1 行，列 name, value"))
-        assertTrue(md.contains("`content://com.wwc2.canmcusdk.CanbusProvider/car_info`：getType："))
+        assertTrue(md.contains("`content://com.wwc2.canmcusdk.CanbusProvider/car_info`：query：返回空"))
+        // Vehicle data through the read-only "xxx_info" call; other method names are refused.
+        assertTrue(md, md.contains("- `car_info`：2 项：doors=[0, 1], speed=42"))
+        assertEquals("不允许的方法", Recon.callProvider(app, "content://com.wwc2.canmcusdk.CanbusProvider/car_info", "set_info2"))
+        // A line seen before (same text) is left out; events come out in time order.
+        val sorted = md.substringAfter("## 后台事件记录").substringBefore("```\n\n")
+        assertTrue(sorted.indexOf("com.wwc2.APK_TO_MAIN") < sorted.indexOf("com.wwc2.LATE"))
         // Nothing of the old full report.
         assertTrue(!md.contains("## 厂商应用") && !md.contains("ro.build.type") && !md.contains("## AOSP"))
 
@@ -113,6 +124,14 @@ class ReconTest {
         assertTrue(all.contains("已知列表没下载到"))
         assertTrue(all.contains("- `com.wwc2.fake.OemSwitch.enterOriginalMedia`") && all.contains("com.wwc2.OLD"))
         EventLog.clear(app)
+    }
+
+    /** Before the background preparation has run, the report still shows the cheap parts and says the code analysis is coming. */
+    @Test
+    fun reportBeforeBackgroundPreparation() {
+        val md = ReconReport.build(app, null).markdown
+        assertTrue(md.contains("## 和上次相比的变化"))
+        assertTrue(md.contains("还在后台准备"))
     }
 
     @Test

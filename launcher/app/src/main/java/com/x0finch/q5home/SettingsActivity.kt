@@ -714,7 +714,7 @@ class SettingsActivity : Activity() {
         val s = share?.takeUnless { it.closed }
         val ip = DebugAccess.ipAddress(this)
         if (s == null || ip == null) {
-            return row(R.drawable.ui_wifi, "手机扫码", if (ip == null) "车机没联网，手机打不开" else "车机开一个临时网页：手机上看报告，可以直接复制发出去",
+            return row(R.drawable.ui_wifi, "手机扫码", if (ip == null) "车机没联网，手机打不开" else reportStatus(),
                 Ui.pill(this, "生成二维码") {
                     if (ip == null) { overlay.snackbar("车机没联网"); return@pill }
                     startShare()
@@ -751,17 +751,16 @@ class SettingsActivity : Activity() {
 
     private fun startShare() {
         stopShare()
-        // Generate the report in the background (reading vendor code takes a while); the web page refreshes itself until it is ready.
+        // The slow part was prepared in the background when the head unit started (ReconReport); only the cheap parts are read now.
+        // If it isn't ready yet (first start of this version), prepare it now; the web page refreshes itself until the report is there.
         lastMarkdown = null
         val since = reconPrefs().getLong(KEY_EVENTS_COPIED, 0L).takeIf { it > 0 }
         val generatedAt = System.currentTimeMillis()
         Thread {
-            val r = runCatching {
-                val known = ReconKnown.load(cache = ReconKnown.cacheFile(this))
-                EventRecorder.reloadKnown(this) // what is known not to matter is no longer recorded at all
-                Recon.report(this, ReconTargets.load(), known, since, generatedAt)
-            }
+            if (ReconReport.staticPart(this) == null) ReconReport.prepareNow(this)
+            val r = runCatching { ReconReport.build(this, since) }
             lastMarkdown = r.getOrNull()?.markdown ?: "生成报告出错：${r.exceptionOrNull()}"
+            runOnUiThread { if (section == SECTION_RECON) render() }
         }.start()
         share = runCatching {
             // Copied / downloaded: the next report's event log continues from this report.
@@ -783,6 +782,15 @@ class SettingsActivity : Activity() {
     }
 
     private fun reconPrefs() = getSharedPreferences("recon", MODE_PRIVATE)
+
+    /** Whether the report prepared in the background is ready. */
+    private fun reportStatus(): String = when {
+        ReconReport.state == ReconReport.State.WORKING -> "报告正在后台准备（车机启动后自动做），也可以先扫码，好了网页会自动显示"
+        ReconReport.readyAt > 0 ->
+            "报告已在后台准备好（${java.text.SimpleDateFormat("HH:mm", java.util.Locale.US).format(java.util.Date(ReconReport.readyAt))}），扫码直接看"
+        ReconReport.staticPart(this) != null -> "报告已准备好，扫码直接看"
+        else -> "车机启动约 2 分钟后自动在后台准备报告；现在扫码也行，会当场准备（要一两分钟）"
+    }
 
     /** Storage usage bar. */
     private class Meter(context: android.content.Context, private val fraction: Float) : View(context) {

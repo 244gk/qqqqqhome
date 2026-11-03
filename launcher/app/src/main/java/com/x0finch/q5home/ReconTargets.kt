@@ -29,6 +29,10 @@ data class ReconTargets(
     val nativeLibs: Regex? = null,
     /** System / Global / Secure settings whose key matches: current values listed. */
     val settings: Regex? = null,
+    /** Only methods / classes whose full name matches are analyzed: the vendor's own code, not bundled libraries. */
+    val vendorClasses: Regex? = null,
+    /** (content:// URI, method) read with ContentResolver.call; only getter methods named "xxx_info" are accepted. */
+    val calls: List<Pair<String, String>> = emptyList(),
 ) {
     class CodeGroup(val name: String, val pattern: Regex)
     class Site(val name: String, val call: Regex)
@@ -38,6 +42,14 @@ data class ReconTargets(
         private const val MAX_PACKAGES = 12
         private const val MAX_GROUPS = 8
         private const val MAX_PROVIDERS = 20
+        /** ContentResolver.call methods allowed: only "xxx_info" getters (CanbusProvider.call returns data for these and writes nothing). */
+        val CALL_METHOD = Regex("^[a-z]{2,20}_info$")
+
+        fun cacheFile(context: android.content.Context) = java.io.File(java.io.File(context.filesDir, "recon"), "targets.json")
+
+        /** The copy kept from the last download, or the built-in one (no network). */
+        fun cached(context: android.content.Context): ReconTargets =
+            runCatching { parse(cacheFile(context).readText(), "车机上次下载的 config/recon-targets.json") }.getOrNull() ?: DEFAULT
 
         /** Kept identical to config/recon-targets.json in the repo (used when the download fails). */
         val DEFAULT_JSON = """
@@ -51,6 +63,10 @@ data class ReconTargets(
                 "com.zjinnova.zlink"
               ],
               "code": [
+                {
+                  "name": "原车切换广播（主页「原车媒体」→ canmcusdk → MCU）",
+                  "pattern": "wwc2\\.com\\.wangyong\\.car|wy\\.switch\\.system|AudiMedia|ACTION_GOTO_CAR|SWITCH_ORIGNIAL|SWITCH_ARM|sendBroadCast\\w*Media|McuManager\\${"$"}1\\.onReceive|McuManager\\${"$"}3\\.handleMessage"
+                },
                 {
                   "name": "原车画面切换",
                   "pattern": "original_screen|enter_original|switch_original|original_unlock|source_avin|media_box|switchOriginalMenu|setOriginal|AvinLogic\\.(switch|set|enter|change|open|start)"
@@ -70,6 +86,11 @@ data class ReconTargets(
                 "content://com.wwc2.canmcusdk.CanbusProvider/car_info",
                 "content://com.wwc2.main.provider.logic/logic"
               ],
+              "calls": [
+                "content://com.wwc2.canmcusdk.CanbusProvider/car_info#car_info",
+                "content://com.wwc2.canmcusdk.CanbusProvider/air_info#air_info",
+                "content://com.wwc2.canmcusdk.CanbusProvider/radar_info#radar_info"
+              ],
               "sites": [
                 {
                   "name": "发广播的地方",
@@ -81,8 +102,9 @@ data class ReconTargets(
                 }
               ],
               "constants": "AvinInterface|VideoSource|CanBusDefine|APK_TO_MAIN|MAIN_TO_APK|MODULE_TO_MODULE|Define${"$"}|Defines${"$"}|Constant|Const${"$"}|Command|Cmd${"$"}|\\${"$"}Stub${"$"}",
-              "nativeLibs": "avin|video|signal|canbus|mcu|serial|uart|source|switch",
+              "nativeLibs": "avin|video|signal|canbus|mcu|serial|uart|switch",
               "settings": "original|origin|avin|canbus|can_|mcu|car|screen_mode|source|reverse|backcar|zlink|carplay",
+              "vendorClasses": "^(com\\.wwc2|wwc2\\.|com\\.baony)",
               "maxMethods": 25,
               "maxEvents": 60
             }
@@ -111,15 +133,25 @@ data class ReconTargets(
                     regex(g.optString("call"))?.let { Site(g.optString("name").ifBlank { "调用" }.take(40), it) }
                 }
             }.orEmpty().take(MAX_GROUPS)
+            val calls = o.optJSONArray("calls")?.let { a -> (0 until a.length()).map { a.getString(it) } }.orEmpty()
+                .mapNotNull { c ->
+                    val uri = c.substringBefore('#'); val method = c.substringAfter('#', "")
+                    (uri to method).takeIf { uri.startsWith("content://com.wwc2") && uri.length <= 200 && CALL_METHOD.matches(method) }
+                }.distinct().take(MAX_PROVIDERS)
             ReconTargets(
                 packages, code, regex(o.optString("strings")), providers,
                 o.optInt("maxMethods", 15).coerceIn(1, 40), o.optInt("maxEvents", 60).coerceIn(5, 200), source,
                 sites, regex(o.optString("constants")), regex(o.optString("nativeLibs")), regex(o.optString("settings")),
+                o.optString("vendorClasses").takeIf { it.isNotBlank() && it.length <= 500 }?.let { runCatching { Regex(it) }.getOrNull() },
+                calls,
             )
         }.getOrNull()
 
-        /** Downloads the latest version from the repo; falls back to the built-in one. Call on a background thread. */
-        fun load(url: String = URL): ReconTargets = runCatching {
+        /**
+         * Downloads the latest version from the repo and keeps a copy in [cache]; offline (the head unit's Wi-Fi drops often) the
+         * copy from last time is used, then the built-in one. Call on a background thread.
+         */
+        fun load(url: String = URL, cache: java.io.File? = null): ReconTargets = runCatching {
             val conn = (URL(url).openConnection() as HttpURLConnection).apply {
                 connectTimeout = 10_000
                 readTimeout = 15_000
@@ -127,11 +159,18 @@ data class ReconTargets(
             }
             try {
                 if (conn.responseCode !in 200..299) null
-                else parse(conn.inputStream.bufferedReader().use { it.readText() }, "仓库 config/recon-targets.json")
+                else {
+                    val text = conn.inputStream.bufferedReader().use { it.readText() }
+                    parse(text, "仓库 config/recon-targets.json")?.also {
+                        cache?.let { f -> runCatching { f.parentFile?.mkdirs(); f.writeText(text) } }
+                    }
+                }
             } finally {
                 conn.disconnect()
             }
-        }.getOrNull() ?: DEFAULT
+        }.getOrNull()
+            ?: cache?.let { f -> runCatching { parse(f.readText(), "车机上次下载的 config/recon-targets.json") }.getOrNull() }
+            ?: DEFAULT
     }
 }
 
@@ -155,7 +194,11 @@ class ReconKnown(
     val ignoreEvents: List<ReconTargets.CodeGroup>,
     /** Where it came from (null = nothing known: the download failed). */
     val source: String?,
+    /** Report lines already seen, as [lineHash]: a line that comes out the same again is left out. */
+    val lines: Set<String> = emptySet(),
 ) {
+    fun knows(line: String) = lineHash(line) in lines
+
     companion object {
         const val URL = "https://raw.githubusercontent.com/244gk/qqqqqhome/HEAD/config/recon-known.json"
 
@@ -164,8 +207,8 @@ class ReconKnown(
          * recorder never writes these to its file; a newer list downloaded with a report replaces this one.
          */
         val DEFAULT_IGNORE = listOf(
-            ReconTargets.CodeGroup("手机信号 / 网络 / SIM 状态",
-                Regex("SIG_STR|SERVICE_STATE|ANY_DATA_STATE|SUBINFO_RECORD|DEFAULT_DATA_SUBSCRIPTION|SIM_STATE_CHANGED")),
+            ReconTargets.CodeGroup("手机信号 / 网络 / SIM / Wi-Fi 开关",
+                Regex("SIG_STR|SERVICE_STATE|ANY_DATA_STATE|SUBINFO|DEFAULT_DATA_SUBSCRIPTION|SIM_STATE_CHANGED|SUBSCRIPTION_PHONE_STATE|RADIO_CAPABILITY|CLEAR_DNS_CACHE|global/wifi_on")),
             ReconTargets.CodeGroup("每分钟的时钟广播", Regex("TIME_TICK|TIME_SET|TIMEZONE_CHANGED")),
             ReconTargets.CodeGroup("电池状态", Regex("BATTERY_CHANGED")),
             ReconTargets.CodeGroup("USB / HDMI 状态", Regex("USB_STATE|HDMI_PLUGGED")),
@@ -173,6 +216,11 @@ class ReconKnown(
         )
 
         val NONE = ReconKnown(null, emptyMap(), emptySet(), emptySet(), emptySet(), DEFAULT_IGNORE, null)
+
+        /** Short hash of one report line (first 16 hex digits of SHA-1 of the trimmed line), as stored in "lines". */
+        fun lineHash(line: String): String =
+            java.security.MessageDigest.getInstance("SHA-1").digest(line.trim().toByteArray(Charsets.UTF_8))
+                .take(8).joinToString("") { String.format("%02x", it) }
 
         /** The last list downloaded, kept on the head unit: used when offline and by the background recorder. */
         fun cacheFile(context: android.content.Context) = java.io.File(java.io.File(context.filesDir, "recon"), "known.json")
@@ -192,7 +240,7 @@ class ReconKnown(
                 }
             }.orEmpty().ifEmpty { DEFAULT_IGNORE }
             ReconKnown(o.optString("system").ifBlank { null }, versions, list("methods").toSet(), list("providers").toSet(),
-                list("strings").toSet(), ignore, source)
+                list("strings").toSet(), ignore, source, list("lines").toSet())
         }.getOrNull()
 
         /**

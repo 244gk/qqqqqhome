@@ -1,5 +1,5 @@
 {
-  "comment": "车机「提交重点报告」时下载这个文件，决定只读分析哪些应用、找哪些代码、试读哪些接口。改这里就能换分析方向，车机不用更新。code 的 pattern 同时匹配代码里的字符串、调用的方法 / 读写的字段名和方法自己的名字；sites 列出调用了这些方法的地方（发广播、打开页面）；constants 列出类名匹配的常量表；nativeLibs 读匹配的原生库导出函数和设备路径；settings 列出名字匹配的系统设置当前值。只能决定读什么，不能让车机做任何写入或切换。",
+  "comment": "车机「提交重点报告」时下载这个文件，决定只读分析哪些应用、找哪些代码、试读哪些接口。改这里就能换分析方向，车机不用更新。code 的 pattern 同时匹配代码里的字符串、调用的方法 / 读写的字段名和方法自己的名字；sites 列出调用了这些方法的地方（发广播、打开页面）；constants 列出类名匹配的常量表；nativeLibs 读匹配的原生库导出函数和设备路径；settings 列出名字匹配的系统设置当前值。vendorClasses 限定只分析厂商自己的代码（不看打包进来的第三方库）；calls 用只读的 ContentResolver.call 读车辆数据（方法名只允许 xxx_info）。只能决定读什么，不能让车机做任何写入或切换。",
   "packages": [
     "com.wwc2.launcher",
     "com.wwc2.main",
@@ -9,6 +9,10 @@
     "com.zjinnova.zlink"
   ],
   "code": [
+    {
+      "name": "原车切换广播（主页「原车媒体」→ canmcusdk → MCU）",
+      "pattern": "wwc2\\.com\\.wangyong\\.car|wy\\.switch\\.system|AudiMedia|ACTION_GOTO_CAR|SWITCH_ORIGNIAL|SWITCH_ARM|sendBroadCast\\w*Media|McuManager\\$1\\.onReceive|McuManager\\$3\\.handleMessage"
+    },
     {
       "name": "原车画面切换",
       "pattern": "original_screen|enter_original|switch_original|original_unlock|source_avin|media_box|switchOriginalMenu|setOriginal|AvinLogic\\.(switch|set|enter|change|open|start)"
@@ -28,6 +32,11 @@
     "content://com.wwc2.canmcusdk.CanbusProvider/car_info",
     "content://com.wwc2.main.provider.logic/logic"
   ],
+  "calls": [
+    "content://com.wwc2.canmcusdk.CanbusProvider/car_info#car_info",
+    "content://com.wwc2.canmcusdk.CanbusProvider/air_info#air_info",
+    "content://com.wwc2.canmcusdk.CanbusProvider/radar_info#radar_info"
+  ],
   "sites": [
     {
       "name": "发广播的地方",
@@ -39,8 +48,9 @@
     }
   ],
   "constants": "AvinInterface|VideoSource|CanBusDefine|APK_TO_MAIN|MAIN_TO_APK|MODULE_TO_MODULE|Define$|Defines$|Constant|Const$|Command|Cmd$|\\$Stub$",
-  "nativeLibs": "avin|video|signal|canbus|mcu|serial|uart|source|switch",
+  "nativeLibs": "avin|video|signal|canbus|mcu|serial|uart|switch",
   "settings": "original|origin|avin|canbus|can_|mcu|car|screen_mode|source|reverse|backcar|zlink|carplay",
+  "vendorClasses": "^(com\\.wwc2|wwc2\\.|com\\.baony)",
   "maxMethods": 25,
   "maxEvents": 60
 }

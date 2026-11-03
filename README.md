@@ -86,8 +86,10 @@ and computed only when the wallpaper changes. Kotlin + classic Views, no third-p
 - **Head unit recon (no adb)**: Desktop settings ("桌面设置") → Head unit recon ("车机摸底"). Read-only look at the system, debug / root clues (build type, su files, adb port),
   vendor apps' entry points / exported Activities / broadcasts, and a list of likely original car, CarPlay and debug pages that you can try with Open ("打开") or Set as original car ("设为原车").
   Tap Generate QR code ("生成二维码") and scan it with your phone: a temporary web page on the head unit (same network, closes after 15 minutes)
-  shows the focused report at the top: tap Copy all ("复制全部") and send the text. Nothing is uploaded anywhere and no GitHub token is needed.
-  The longer full report can be generated on the recon page and then appears below it on the same web page.
+  shows the report: tap Copy all ("复制全部") and send the text. Nothing is uploaded anywhere and no GitHub token is needed.
+  There is one report and it only contains what is new compared with earlier reports (`config/recon-known.json`): changes, the
+  background event log since the last copied report, and a read-only analysis of the vendor code. While q5home runs it listens in the
+  background (never sends or changes anything); turning on usage access ("使用情况访问权限") for q5home also records which app comes to the front.
 - **Appearance**: dark only (liquid glass); every page is full screen with the status bar hidden. The old `appearance` field in config.json is kept but no longer applied.
   Moving between the launcher's own pages fades and zooms slightly (it hides the head unit's slowness); opening CarPlay or the original car screen is instant.
 - **Home GPS**: the GPS card shows speed, heading (while driving) and altitude; only with a fresh fix, otherwise a single status line.

@@ -237,9 +237,9 @@ def check_share(demo, out):
     parsed = urllib.parse.urlparse(url)
     adb("forward", "tcp:18765", f"tcp:{parsed.port}")
     local = f"http://127.0.0.1:18765{parsed.path}"
-    # The page shows the focused report at the top; it takes a while to generate (503 until ready).
+    # The page shows the one report; it takes a while to generate (503 until ready).
     report = ""
-    for _ in range(30):
+    for _ in range(90):
         try:
             report = urllib.request.urlopen(local + "report.md", timeout=10).read().decode("utf-8")
             break
@@ -248,7 +248,7 @@ def check_share(demo, out):
                 raise
             time.sleep(2)
     page = urllib.request.urlopen(local, timeout=10).read().decode("utf-8")
-    if "车机摸底" not in page or "重点报告" not in page or "## 版本" not in report:
+    if "车机摸底" not in page or "复制全部" not in page or "## 和上次相比的变化" not in report:
         raise RuntimeError("temporary web page content is wrong")
     with open(os.path.join(out, "recon-page.html"), "w", encoding="utf-8") as f:
         f.write(page)
@@ -385,10 +385,10 @@ def main():
         demo.tap("版本更新", "⑱ 左侧切到「版本更新」→ 检查 GitHub Release", prefix=True)
         time.sleep(3)  # wait for the check result
         demo.shot("settings-update")
-        demo.tap("车机摸底", "⑲ 左侧切到「车机摸底」→ 只读查系统、调试线索、原车 / CarPlay 组件")
-        demo.find("要点")  # recon runs in the background; the summary appearing means it finished
+        demo.tap("车机摸底", "⑲ 左侧切到「车机摸底」→ 后台只听不发，扫码拿只有新内容的报告")
+        demo.find("事件记录")
         demo.shot("settings-recon")
-        demo.tap("生成二维码", "⑳ 点「生成二维码」→ 车机开临时网页：手机扫码直接看重点报告，可以复制发出去")
+        demo.tap("生成二维码", "⑳ 点「生成二维码」→ 车机开临时网页：手机扫码看报告（只有新内容），可以复制发出去")
         demo.shot("settings-recon-qr")
         check_share(demo, args.out)
         demo.tap("GPS 与 4G", "㉑ 左侧切到「GPS 与 4G」→ 卫星、定位、SIM 卡、4G 信号（只读）")

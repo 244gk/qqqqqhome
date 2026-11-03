@@ -1,21 +1,15 @@
 package com.x0finch.q5home
 
 import android.app.Application
-import android.content.pm.ApplicationInfo
-import android.content.pm.PackageInfo
 import androidx.test.core.app.ApplicationProvider
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
-import org.robolectric.Robolectric
 import org.robolectric.RobolectricTestRunner
-import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config as RC
 import java.io.File
-import java.util.zip.ZipEntry
-import java.util.zip.ZipOutputStream
 
 @RunWith(RobolectricTestRunner::class)
 @RC(sdk = [31])
@@ -61,32 +55,28 @@ class ReconTargetsTest {
     }
 
     @Test
-    fun focusedReportShowsOnlyTargets() {
-        Robolectric.setupContentProvider(ReconTest.FakeCanbusProvider::class.java, "com.wwc2.canmcusdk.CanbusProvider")
-        val apk = File.createTempFile("main", ".apk")
-        ZipOutputStream(apk.outputStream()).use { zip ->
-            zip.putNextEntry(ZipEntry("classes.dex"))
-            zip.write(javaClass.classLoader!!.getResourceAsStream("oem-switch.dex")!!.readBytes())
-            zip.closeEntry()
+    fun knownListParsesAndRepoFileIsValid() {
+        val repo = generateSequence(File("").absoluteFile) { it.parentFile }
+            .map { File(it, "config/recon-known.json") }.first { it.exists() }
+        val k = ReconKnown.parse(repo.readText(), "repo")!!
+        assertTrue(k.versions.size >= 30 && k.strings.isNotEmpty() && k.methods.isNotEmpty())
+        assertTrue(k.ignoreEvents.any { it.pattern.containsMatchIn("android.intent.action.SIG_STR · x") })
+        // The recorder's built-in list matches the repo file (change one, change the other).
+        assertEquals(k.ignoreEvents.map { it.name to it.pattern.pattern }, ReconKnown.DEFAULT_IGNORE.map { it.name to it.pattern.pattern })
+        assertNull(ReconKnown.parse("nope", "t"))
+        TestHttpServer { 404 to ByteArray(0) }.use { s -> assertNull(ReconKnown.load(s.base + "/k.json").source) }
+        // Offline: the copy kept from the last download is used.
+        val cache = File.createTempFile("known", ".json")
+        TestHttpServer { 200 to """{"system":"cached"}""".toByteArray() }.use { s -> ReconKnown.load(s.base + "/k.json", cache) }
+        TestHttpServer { 500 to ByteArray(0) }.use { s ->
+            val k2 = ReconKnown.load(s.base + "/k.json", cache)
+            assertEquals("cached", k2.system)
+            assertTrue(k2.source!!.contains("这次没下载到"))
         }
-        shadowOf(app.packageManager).installPackage(PackageInfo().apply {
-            packageName = "com.wwc2.main"; versionName = "8.4.154"
-            applicationInfo = ApplicationInfo().apply { packageName = "com.wwc2.main"; sourceDir = apk.path }
-        })
-        val t = ReconTargets.parse("""{"packages":["com.wwc2.main","com.not.installed"],
-            "code":[{"name":"原车画面切换","pattern":"original_screen"}],
-            "strings":"original",
-            "providers":["content://com.wwc2.canmcusdk.CanbusProvider/original_screen"]}""", "测试")!!
-        val md = Recon.focused(app, t).markdown
-        assertTrue(md.contains("**重点报告**"))
-        assertTrue(md.contains("| `com.wwc2.main` | 8.4.154"))
-        assertTrue(md.contains("| `com.not.installed` | 未安装 |"))
-        assertTrue(md.contains("## 原车画面切换（只读反汇编）"))
-        assertTrue(md, md.contains("- `com.wwc2.fake.OemSwitch.enterOriginalMedia`"))
-        assertTrue(md.contains("`content://com.wwc2.canmcusdk.CanbusProvider/original_screen`"))
-        assertTrue(md.contains("name=original_screen, value=1"))
-        assertTrue(md.contains("## 相关字符串"))
-        // No more package list, system properties and the like.
-        assertTrue(!md.contains("## 厂商应用") && !md.contains("ro.build.type"))
+        TestHttpServer { 200 to """{"system":"x","versions":{"a.b":"1"}}""".toByteArray() }.use { s ->
+            val loaded = ReconKnown.load(s.base + "/k.json")
+            assertEquals("x", loaded.system)
+            assertEquals(mapOf("a.b" to "1"), loaded.versions)
+        }
     }
 }

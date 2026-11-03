@@ -14,13 +14,12 @@ import kotlin.concurrent.thread
  * (the owner just sends the copied text). Read-only: nothing is uploaded anywhere and no token is ever involved. Runs only while the "车机摸底" (recon) settings page is open and closes itself after [TIMEOUT_MS];
  * the path contains a random string so other devices on the same network can't guess it.
  *
- * [report] returns the focused report Markdown (null while it is still being generated); [full] the full report, if one was
- * generated on the recon page; [events] the background event log since a time (null = all), or null when there is none.
+ * [report] returns the report Markdown (null while it is still being generated). [onCopied] runs when the owner copies or
+ * downloads it: the next report's event log then starts from that report.
  */
 class LocalShare(
     private val report: () -> String?,
-    private val full: () -> String? = { null },
-    private val events: (sinceMs: Long?) -> String? = { null },
+    private val onCopied: () -> Unit = {},
     port: Int = DEFAULT_PORT,
 ) {
     private val server: ServerSocket = runCatching { ServerSocket().apply { reuseAddress = true; bind(InetSocketAddress(port)) } }
@@ -68,10 +67,7 @@ class LocalShare(
             method == "GET" && path == base -> Triple(200, HTML, page())
             method == "GET" && path == "${base}report.md" ->
                 report()?.let { Triple(200, "text/markdown; charset=utf-8", it) } ?: Triple(503, TEXT, "报告还在生成，稍后刷新")
-            method == "GET" && path == "${base}events.md" ->
-                events(null)?.let { Triple(200, "text/markdown; charset=utf-8", it) } ?: Triple(404, TEXT, "还没有事件记录")
-            method == "GET" && path == "${base}full.md" ->
-                full()?.let { Triple(200, "text/markdown; charset=utf-8", it) } ?: Triple(404, TEXT, "没有生成完整报告")
+            method == "GET" && path == "${base}copied" -> { onCopied(); Triple(200, TEXT, "ok") }
             else -> Triple(404, TEXT, "没有这个页面")
         }
         val bytes = content.toByteArray(Charsets.UTF_8)
@@ -82,19 +78,15 @@ class LocalShare(
         out.flush()
     }
 
-    /**
-     * The page: the focused report (copy all or download — sending the copied text is enough), then the full report if one was
-     * generated. While the focused report is still being generated the page refreshes itself every 5 s.
-     */
+    /** The page: the one report, to copy or download (sending the copied text is enough); refreshes itself while generating. */
     private fun page(): String {
         val md = report()
-        val fullMd = full()
-        val recent = events(System.currentTimeMillis() - RECENT_MS)
         val refresh = if (md == null) "<meta http-equiv=\"refresh\" content=\"5\">" else ""
-        fun section(id: String, file: String, text: String) = """
-              <button onclick="var t=document.getElementById('$id');t.select();document.execCommand('copy');this.textContent='已复制'">复制全部</button>
-              <a class="btn sec" href="$file" download="$file">下载 $file</a>
-              <p><textarea id="$id" readonly>${esc(text)}</textarea></p>"""
+        val body = if (md == null) "正在生成报告（要读厂商应用的代码，可能一两分钟），本页会自动刷新…" else """
+              <button onclick="var t=document.getElementById('r');t.select();document.execCommand('copy');fetch('copied');this.textContent='已复制'">复制全部</button>
+              <a class="btn sec" href="report.md" download="report.md" onclick="fetch('copied')">下载 report.md</a>
+              <p><textarea id="r" readonly>${esc(md)}</textarea></p>
+              <p><small>点「复制全部」，直接发出去就行。复制后，下一份报告的事件记录从这里接着往下记。</small></p>"""
         return """
             <!doctype html><html lang="zh"><head><meta charset="utf-8">
             <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -102,24 +94,15 @@ class LocalShare(
             <title>q5home 车机摸底</title>
             <style>
               body{margin:0;padding:16px;background:#0f0f11;color:#eee;font:16px/1.5 -apple-system,system-ui,sans-serif}
-              h1{font-weight:300;font-size:26px;margin:8px 0 4px} h2{font-size:17px;margin:24px 0 8px}
+              h1{font-weight:300;font-size:26px;margin:8px 0 4px}
               .card{background:#1c1c1f;border:1px solid #333;border-radius:16px;padding:16px;margin:12px 0}
               button,.btn{display:inline-block;margin-top:12px;margin-right:8px;padding:12px 20px;border:0;border-radius:24px;background:#6e7dff;color:#fff;font-size:16px;font-weight:600;text-decoration:none}
               .sec{background:#333;color:#fff} small{color:#999}
-              textarea{width:100%;box-sizing:border-box;height:45vh;background:#000;color:#ccc;border:1px solid #333;border-radius:12px;font:12px/1.4 ui-monospace,monospace}
+              textarea{width:100%;box-sizing:border-box;height:60vh;background:#000;color:#ccc;border:1px solid #333;border-radius:12px;font:12px/1.4 ui-monospace,monospace}
             </style></head><body>
-            <h1>q5home 车机摸底</h1><small>车机上的临时网页，离开摸底页面或 15 分钟后关闭。只读，不会改动车机，也不会上传到任何地方。</small>
-            <h2>重点报告</h2>
-            <div class="card">
-              ${if (md == null) "正在生成重点报告（几十秒），本页会自动刷新…" else section("r", "report.md", md) +
-                "<p><small>点「复制全部」，直接发出去就行。</small></p>"}
+            <h1>q5home 车机摸底</h1><small>车机上的临时网页，离开摸底页面或 15 分钟后关闭。只读，不会改动车机，也不会上传到任何地方。只列之前报告里没有的新内容。</small>
+            <div class="card">$body
             </div>
-            <h2>事件记录（最近 30 分钟）</h2>
-            <div class="card">
-              ${if (recent == null) "还没有事件记录。" else section("e", "events.md", recent).replace("下载 events.md", "下载全部记录") +
-                "<p><small>q5home 在后台只听不发，记下广播、数据变化、设置和属性变化。操作完车机后，复制这一段发出去；更早的在「下载全部记录」里。</small></p>"}
-            </div>
-            ${if (fullMd == null) "" else "<h2>完整报告</h2><div class=\"card\">" + section("f", "full.md", fullMd) + "</div>"}
             </body></html>
         """.trimIndent()
     }
@@ -127,7 +110,6 @@ class LocalShare(
     companion object {
         const val DEFAULT_PORT = 8765
         const val TIMEOUT_MS = 15 * 60_000L
-        const val RECENT_MS = 30 * 60_000L
         private const val MAX_BODY = 16 * 1024
         private const val HTML = "text/html; charset=utf-8"
         private const val TEXT = "text/plain; charset=utf-8"

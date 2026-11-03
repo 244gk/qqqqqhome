@@ -142,10 +142,16 @@ object Targets {
      */
     const val WWC2_HOME = "com.wwc2.launcher"
 
-    /** Auto-detects the OEM app: first by label keywords, then falls back to the WWC2 stock home. If not found, the user picks one by long-press or via config.json. */
-    fun findOem(context: Context): String? =
-        findByKeywords(context, OEM_KEYWORDS)
-            ?: launchableApps(context).firstOrNull { it.activityInfo.packageName == WWC2_HOME }?.let { specOf(it) }
+    /**
+     * Auto-detects the OEM entry: the WWC2 stock home "主页" first (the owner's choice: its "原车媒体" switches to the OEM screen;
+     * other apps whose names contain 原车 / oem are not the switch), then by label keywords. If not found, the user picks one by
+     * long-press or via config.json.
+     */
+    fun findOem(context: Context): String? = stockHome(context) ?: findByKeywords(context, OEM_KEYWORDS)
+
+    /** Launch spec of the WWC2 stock home "主页", or null when it isn't installed. */
+    fun stockHome(context: Context): String? =
+        launchableApps(context).firstOrNull { it.activityInfo.packageName == WWC2_HOME }?.let { specOf(it) }
 
     /** Auto-detects the file manager. */
     fun findFiles(context: Context): String? {

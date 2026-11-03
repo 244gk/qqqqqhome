@@ -87,7 +87,10 @@ Add package names here as they are identified:
 - `launcher/`: launcher APK, Kotlin + classic Views (no Compose, the head unit CPU is weak), no third-party dependencies.
   - `build-and-install.sh`: build and install; `--set-home` confirms, records and supports rollback before switching the default launcher.
   - Configuration: SharedPreferences + a `config.json` that can be pushed via adb (see `Config.kt`, `Targets.kt`).
-  - Once recon finds the original car switching component, put it in the `oem` field of config.json; do not hardcode it.
+  - The OEM ("原车") tile opens the stock home "主页" (`com.wwc2.launcher`) by default (the owner's choice: its "原车媒体" switches
+    to the OEM screen); `Targets.findOem` tries it before any app whose name contains 原车 / oem, and `Config` moved an entry stored
+    by the old detection to it once (`oem_home_fix_v1`). Once recon finds the original car switching component, put it in the `oem`
+    field of config.json; do not hardcode it.
   - Home screen icons are in `Icons.kt` (Material Symbols vectors); tile = icon key + target; switching apps only changes the target.
   - Wallpapers are in `res/drawable-nodpi/wall_*.webp`, sources recorded in `CREDITS.md`; update it when adding wallpapers.
   - Online wallpapers: `OnlineWallpapers.kt` + `WallpaperJob.kt` (Wi-Fi only, once a day); storage limit 8 images / 6 MB,
@@ -126,9 +129,9 @@ Add package names here as they are identified:
     tests, checks the signature, then publishes the Release (notes = commits since the previous release). The emulator demo is a
     separate workflow (`demo.yml`, Actions → demo), run only when a recording is wanted; both reuse `build.yml`.
     Only start either yourself when the owner asks.
-  - Head unit recon (no adb): `Recon.kt` (read-only collection), `LocalShare.kt` (temporary web page opened by scanning a QR code with
-    a phone: the focused report at the top, ready to copy and send, and the full report below it once generated on the recon page;
-    path contains a random string, closes after 15 minutes). **Reports are never uploaded and no GitHub token is used**: the owner copies
+  - Head unit recon (no adb): the recon page has only the QR code, the event log (count, clear) and the usage-access status; nothing
+    already known is shown there. `Recon.kt` (the read-only report), `LocalShare.kt` (temporary web page opened by scanning a QR code with
+    a phone: the one report, ready to copy and send; path contains a random string, closes after 15 minutes). **Reports are never uploaded and no GitHub token is used**: the owner copies
     the text and sends it. `QrCode.kt` (hand-written QR code, tests check fixed hashes).
     `ApkStrings.kt` (reads string constants from vendor APKs), `DexScan.kt` (read-only disassembly: call order in methods that use
     matching strings, call / access matching methods or fields, or are named that way; call sites such as sendBroadcast /
@@ -137,12 +140,19 @@ Add package names here as they are identified:
     device-path strings as bytes, never loads it; test library `libavin-test.so.bin` built from `libavin-test.c.txt` with gcc).
     Background recording: `EventRecorder.kt` starts with the process (`Q5App`) and only listens: broadcasts (built-in plus
     action-like names found in the vendor apps' code), change notifications of vendor content providers, System / Global / Secure
-    settings changes and polled system properties named in vendor code; `EventLog.kt` writes them to q5home's own file (2 MB cap,
-    oldest dropped), with every process start, so gaps show. It must never send, write or switch anything on the head unit.
-    The QR page has a separate "事件记录" (event log) section: the last 30 minutes, with the whole log as a download.
-    The QR page shows the **focused report**: analysis targets come from `config/recon-targets.json` in the repository (downloaded when the report is generated; the same copy is built into `ReconTargets.kt`,
-    and tests check that the two match). **To change the analysis focus, edit only this file; no release needed**. It may only decide what to read; never add the ability to write to or switch anything on the head unit.
-    Only Full report ("完整报告") lists all apps, system properties, etc.
+    settings changes and polled system properties named in vendor code; `EventLog.kt` writes them to q5home's own file in batches
+    (every 30 s / 100 lines, at once on process start, screen off and shutdown; 2 MB cap, oldest dropped), with every process start,
+    so gaps show. Events known not to matter ("ignoreEvents" in `config/recon-known.json`, built-in copy `ReconKnown.DEFAULT_IGNORE`,
+    tests check they match; the copy downloaded with a report replaces it) are never registered or written. It must never send, write or switch anything on the head unit.
+    Usage access ("使用情况访问权限"), if the owner turns it on in system settings, adds which app / page came to the front.
+    **There is exactly one report** (the owner's rule: no focused / full split) and it shows **only what is new**:
+    `config/recon-known.json` lists what earlier reports already showed (system build, vendor app versions, disassembled methods,
+    provider query results, code strings, known event noise); it is downloaded when the report is generated and everything in it is
+    left out. **After reading each report, add what it taught us to that file (no release needed).** The report has: changes
+    (system, vendor apps added / removed / updated with their components and new strings), GPS, the event log since the owner last
+    copied a report (the web page tells the app on copy), and the read-only analysis set by `config/recon-targets.json`
+    (same copy built into `ReconTargets.kt`, tests check they match; change the analysis focus there, no release needed).
+    These files may only decide what to read; never add the ability to write to or switch anything on the head unit.
     The recon page must stay read-only; never add any operation that changes the head unit's state (disabling, changing settings, etc.). The owner pastes reports into the conversation.
   - Home screen = **Bento dashboard** (`activity_main.xml`): top row clock card | GPS card (big speed + `ui/SunArcView`
     sunrise/sunset arc) | big CarPlay card (id `firstTile`, the square on its left is the current wallpaper, no label above its title);

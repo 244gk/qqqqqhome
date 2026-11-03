@@ -162,11 +162,7 @@ class ScreenshotTest {
         val intent = Intent(context, SettingsActivity::class.java)
             .putExtra(SettingsActivity.EXTRA_SECTION, SettingsActivity.SECTION_RECON)
         val activity = Robolectric.buildActivity(SettingsActivity::class.java, intent).setup().get()
-        repeat(50) {
-            shadowOf(Looper.getMainLooper()).idle()
-            if (findText(activity.window.decorView, "正在摸底…") == null) return@repeat
-            Thread.sleep(100)
-        }
+        shadowOf(Looper.getMainLooper()).idle()
         shoot(activity, "ui-settings-recon")
         // Also save a tall image of the whole page (inside the ScrollView) to see the QR code below.
         val scroll = generateSequence(listOf<View>(activity.window.decorView)) { level ->

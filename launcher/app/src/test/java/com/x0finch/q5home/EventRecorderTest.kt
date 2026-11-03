@@ -29,15 +29,21 @@ class EventRecorderTest {
         assertTrue(all[1].endsWith("广播  new line")) // one event = one line
         assertEquals(listOf(all[1]), EventLog.lines(app, sinceMs = t0 + 30_000))
         assertEquals(t0 + 60_000, EventLog.timeOf(all[1]))
-        assertTrue(EventLog.markdown(app, null, "事件记录").contains("事件记录（2 条）"))
+        // Written in batches: nothing on disk until a flush (lines() flushes first).
+        EventLog.clear(app)
+        EventLog.append(app, "广播", "batched", t0)
+        assertTrue(!EventLog.file(app).exists() || EventLog.file(app).length() == 0L)
+        EventLog.append(app, "启动", "important", t0, now = true)
+        assertTrue(EventLog.file(app).readText().contains("batched"))
 
         // Past the cap the oldest part is dropped, starting at a whole line.
         val big = "x".repeat(500)
         repeat((EventLog.MAX_BYTES / 520 + 10).toInt()) { EventLog.append(app, "广播", "$it $big", t0 + 120_000) }
+        EventLog.flush()
         val f = EventLog.file(app)
         assertTrue(f.length() <= EventLog.MAX_BYTES)
         val lines = EventLog.lines(app)
-        assertFalse(lines.any { it.endsWith("old") })
+        assertFalse(lines.any { it.endsWith("batched") })
         assertTrue(lines.all { it.startsWith("20") })
         EventLog.clear(app)
         assertTrue(EventLog.lines(app).isEmpty())
@@ -56,6 +62,15 @@ class EventRecorderTest {
         assertEquals("repeats within a second are folded", 1, hits.size)
         assertTrue(hits[0], hits[0].contains("广播  com.wwc2.APK_TO_MAIN · cmd=7, data=[1, 2]"))
         assertTrue(EventLog.lines(app).first().contains("q5home 进程启动"))
+    }
+
+    @Test
+    fun knownNoiseIsNeverRecorded() {
+        assertTrue(EventRecorder.isIgnored("android.intent.action.SIG_STR · LteRsrp=-99"))
+        assertTrue(EventRecorder.isIgnored("content://com.wwc2.canmcusdk.CanbusProvider/car_info"))
+        assertTrue(EventRecorder.isIgnored("android.intent.action.TIME_TICK"))
+        assertFalse(EventRecorder.isIgnored("com.wwc2.APK_TO_MAIN · cmd=7"))
+        assertFalse(EventRecorder.isIgnored("content://com.wwc2.canmcusdk.CanbusProvider/original_screen"))
     }
 
     @Test

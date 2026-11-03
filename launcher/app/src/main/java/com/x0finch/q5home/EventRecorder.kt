@@ -26,14 +26,19 @@ import java.io.File
  *  2. Change notifications from the vendor apps' content providers (e.g. CanbusProvider): the changed address;
  *  3. System / Global / Secure settings: key, old value → new value;
  *  4. System properties named in the vendor apps' code (persist.*, sys.*, ...), checked every [PROP_POLL_MS];
- *  5. q5home's own process start (gaps in the log = the process was not running) and home screen shown / left.
+ *  5. q5home's own process start (gaps in the log = the process was not running) and home screen shown / left;
+ *  6. with usage access granted by the owner ("使用情况访问权限"): which app and page came to the front.
  *
  * Limits: since Android 8 only broadcasts sent to everyone reach a registered receiver; broadcasts sent to one app
- * (setPackage / setComponent) are not seen. Repeats of the same event within a second are counted, not logged one by one.
+ * (setPackage / setComponent) are not seen. Repeats of the same event within a second (provider changes: 10 seconds) are counted,
+ * not logged one by one. Sticky broadcasts replayed on registration are old state and skipped. Events already known not to matter
+ * ([ReconKnown.ignoreEvents]) are not recorded at all, and the file is written in batches ([EventLog]).
  */
 object EventRecorder {
     const val PROP_POLL_MS = 2_000L
     private const val REPEAT_WINDOW_MS = 1_000L
+    /** Provider change notifications can stream (car_info: 5–20 a second): folded over a longer window. */
+    private const val DATA_WINDOW_MS = 10_000L
     private const val MAX_PER_SECOND = 40
     private const val MAX_ACTIONS = 600
     private const val MAX_PROPS = 200
@@ -47,6 +52,22 @@ object EventRecorder {
         "android.intent.action.ACTION_SHUTDOWN", "android.intent.action.REBOOT",
         "com.wwc2.APK_TO_MAIN", "com.wwc2.MAIN_TO_APK", "com.wwc2.MODULE_TO_MODULE",
     )
+    /** Broadcasts after which the file is written at once (the head unit may lose power right after). */
+    private val FLUSH_NOW = setOf(Intent.ACTION_SCREEN_OFF, Intent.ACTION_SHUTDOWN, "android.intent.action.ACTION_SHUTDOWN",
+        "android.intent.action.REBOOT")
+
+    /**
+     * Events already known not to matter ([ReconKnown.ignoreEvents]: phone signal, the minute tick, battery, the car_info stream, …):
+     * never registered and never written. The list downloaded with the latest report replaces the built-in one.
+     */
+    @Volatile private var ignore: List<Regex> = ReconKnown.DEFAULT_IGNORE.map { it.pattern }
+
+    fun isIgnored(text: String) = ignore.any { it.containsMatchIn(text) }
+
+    /** Picks up the known list downloaded with a report (call after [ReconKnown.load] saved a new copy). */
+    fun reloadKnown(context: Context) {
+        ignore = ReconKnown.cached(context).ignoreEvents.map { it.pattern }
+    }
     private val BUILTIN_PROPS = listOf("sys.usb.state", "sys.usb.config", "sys.boot_completed", "service.adb.tcp.port")
     private val ACTION_LIKE = Regex("^[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z0-9_]+){2,}$")
     private val PROP_LIKE = Regex("^(persist|sys|vendor|debug|init|dev|media|hw|ctl)\\.[A-Za-z0-9_.\\-]{2,80}$")
@@ -73,22 +94,63 @@ object EventRecorder {
 
     private fun begin(app: Context, h: Handler) {
         val version = runCatching { app.packageManager.getPackageInfo(app.packageName, 0).versionName }.getOrNull() ?: "?"
-        EventLog.append(app, "启动", "q5home 进程启动（版本 $version，pid ${Process.myPid()}）")
+        reloadKnown(app)
+        EventLog.append(app, "启动", "q5home 进程启动（版本 $version，pid ${Process.myPid()}）", now = true)
         register(app, h, BUILTIN_ACTIONS)
         watchSettings(app, h)
         val providers = watchProviders(app, h)
-        // Reading the vendor APKs takes a while: done after the cheap parts are already listening, and cached per app version.
-        val found = discover(app)
-        register(app, h, found.first.filter { it !in BUILTIN_ACTIONS })
-        synchronized(props) { (BUILTIN_PROPS + found.second).distinct().forEach { props[it] = Recon.prop(it) } }
         h.postDelayed(object : Runnable {
             override fun run() {
                 runCatching { pollProps(app) }
+                runCatching { pollForeground(app) }
+                if (++ticks % (EventLog.FLUSH_MS / PROP_POLL_MS).toInt() == 0) EventLog.flush()
                 h.postDelayed(this, PROP_POLL_MS)
             }
         }, PROP_POLL_MS)
-        EventLog.append(app, "启动", "开始记录：广播 ${BUILTIN_ACTIONS.size + found.first.size} 种 · 数据接口 $providers 个 · " +
-            "系统设置 3 张表 · 系统属性 ${props.size} 个")
+        // Reading the vendor APKs takes tens of seconds the first time: done on its own thread so the recorder thread keeps
+        // writing events with their real times meanwhile; the result is cached per app version.
+        Thread({
+            val found = runCatching { discover(app) }.getOrDefault(emptyList<String>() to emptyList())
+            h.post {
+                val actions = found.first.filter { it !in BUILTIN_ACTIONS && !isIgnored(it) }
+                register(app, h, actions)
+                synchronized(props) { (BUILTIN_PROPS + found.second).distinct().forEach { props[it] = Recon.prop(it) } }
+                EventLog.append(app, "启动", "开始记录：广播 ${BUILTIN_ACTIONS.size + actions.size} 种 · 数据接口 $providers 个 · " +
+                    "系统设置 3 张表 · 系统属性 ${props.size} 个 · 前台应用 ${if (usageAllowed(app)) "已开启" else "没开启（要「使用情况访问权限」）"}" +
+                    " · 已知不需要的不记：${ignore.size} 类", now = true)
+            }
+        }, "q5-recorder-discover").apply { priority = Thread.MIN_PRIORITY; isDaemon = true }.start()
+    }
+
+    /** Is "使用情况访问权限" (usage access) granted to q5home? Granted by the owner in system settings; q5home never changes it. */
+    fun usageAllowed(context: Context): Boolean = runCatching {
+        val ops = context.getSystemService(android.app.AppOpsManager::class.java)
+        @Suppress("DEPRECATION")
+        ops.checkOpNoThrow(android.app.AppOpsManager.OPSTR_GET_USAGE_STATS, Process.myUid(), context.packageName) ==
+            android.app.AppOpsManager.MODE_ALLOWED
+    }.getOrDefault(false)
+
+    private var foregroundSince = 0L
+    private var ticks = 0
+
+    /** Which app / page came to the front, from the system's usage events (only with usage access). */
+    private fun pollForeground(app: Context) {
+        if (!usageAllowed(app)) return
+        val usm = app.getSystemService(android.app.usage.UsageStatsManager::class.java) ?: return
+        val now = System.currentTimeMillis()
+        if (foregroundSince == 0L) foregroundSince = now - PROP_POLL_MS
+        val events = usm.queryEvents(foregroundSince, now) ?: return
+        val e = android.app.usage.UsageEvents.Event()
+        while (events.hasNextEvent()) {
+            events.getNextEvent(e)
+            if (e.timeStamp < foregroundSince) continue
+            @Suppress("DEPRECATION")
+            if (e.eventType == android.app.usage.UsageEvents.Event.MOVE_TO_FOREGROUND) {
+                val text = "${e.packageName}/${e.className ?: "?"}"
+                EventLog.append(app, "前台", text, e.timeStamp)
+            }
+        }
+        foregroundSince = now
     }
 
     /** q5home's own home screen shown / left (to line up with what the owner did). */
@@ -98,11 +160,14 @@ object EventRecorder {
 
     private fun register(app: Context, h: Handler, actions: List<String>) {
         if (actions.isEmpty()) return
-        val filter = IntentFilter().apply { actions.forEach { addAction(it) } }
+        val filter = IntentFilter().apply { actions.filterNot { isIgnored(it) }.forEach { addAction(it) } }
         val receiver = object : BroadcastReceiver() {
             override fun onReceive(c: Context, intent: Intent) {
+                // The system replays the last "sticky" broadcast on registration: that is old state, not an event.
+                if (isInitialStickyBroadcast) return
                 val text = describe(intent)
                 log(app, "广播", text, key = text)
+                if (intent.action in FLUSH_NOW) EventLog.flush()
             }
         }
         runCatching {
@@ -218,7 +283,7 @@ object EventRecorder {
     }
 
     /**
-     * Action-like and property-like names in the code of the vendor apps (the focused report's packages plus every com.wwc2.* app),
+     * Action-like and property-like names in the code of the vendor apps (the report's target packages plus every com.wwc2.* app),
      * cached in q5home's files and only re-read when one of those apps changes version.
      */
     private fun discover(app: Context): Pair<List<String>, List<String>> {
@@ -263,9 +328,11 @@ object EventRecorder {
 
     /** Writes one line, folding repeats of the same [key] within a second and capping the rate. Runs on the recorder thread. */
     private fun log(app: Context, kind: String, text: String, key: String) {
+        if (isIgnored(text)) return
         val now = System.currentTimeMillis()
         val prev = last[key]
-        if (prev != null && now - prev.first < REPEAT_WINDOW_MS) { last[key] = prev.first to prev.second + 1; return }
+        val window = if (kind == "数据变化") DATA_WINDOW_MS else REPEAT_WINDOW_MS
+        if (prev != null && now - prev.first < window) { last[key] = prev.first to prev.second + 1; return }
         if (now - secondStart >= 1000) {
             if (droppedInSecond > 0) EventLog.append(app, "提示", "上一秒事件太多，跳过了 $droppedInSecond 条")
             secondStart = now; inSecond = 0; droppedInSecond = 0
@@ -274,6 +341,7 @@ object EventRecorder {
         val repeats = prev?.second ?: 0
         last[key] = now to 0
         if (last.size > 5000) last.clear()
-        EventLog.append(app, kind, if (repeats > 0) "$text（之前 1 秒内还重复了 $repeats 次）" else text, now)
+        val note = if (repeats > 0) "（之前 ${window / 1000} 秒内还重复了 $repeats 次）" else ""
+        EventLog.append(app, kind, text + note, now)
     }
 }

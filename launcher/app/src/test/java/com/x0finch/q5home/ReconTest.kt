@@ -37,40 +37,6 @@ class ReconTest {
         })
     }
 
-    @Test
-    fun findsCandidatesAndWritesReport() {
-        FakeApps.installCar(app)
-        installPackage("com.zjinnova.zlink", "ZLINK", listOf("com.zjinnova.zlink.MainActivity"))
-        installPackage("com.wy.oem", "原车", listOf("com.wy.oem.MainActivity"), listOf("com.wy.oem.SwitchReceiver"))
-        installPackage("com.wy.factory", "工厂设置", listOf("com.wy.factory.Main", "com.wy.factory.UsbModeActivity"))
-        val mainApk = ApkStringsTest.fakeApk(java.io.File.createTempFile("main", ".apk"),
-            listOf("com.wwc2.main.ACTION_ENTER_OEM", "boring"))
-        installPackage("com.wwc2.main", "main", listOf("com.wwc2.main.MainActivity"), apk = mainApk)
-        installPackage("com.wy.junk", "广告", listOf("com.wy.junk.AdActivity"), enabled = false)
-        installPackage("com.android.settings", "设置", listOf(
-            "com.android.settings.Settings\$DevelopmentSettingsDashboardActivity", "com.android.settings.Settings\$WifiSettingsActivity"))
-
-        val report = Recon.collect(app, ports = emptyList())
-        val kinds = report.candidates.associate { it.spec to it.kind }
-        assertEquals("CarPlay", kinds[FakeApps.ZLINK])
-        assertEquals("原车", kinds[FakeApps.OEM])
-        assertEquals("调试", kinds["com.wy.factory/com.wy.factory.UsbModeActivity"])
-        assertEquals("调试", kinds["com.android.settings/com.android.settings.Settings\$DevelopmentSettingsDashboardActivity"])
-        assertTrue("WiFi settings is not a debug page", kinds.keys.none { it.contains("WifiSettings") })
-
-        val md = report.markdown
-        assertTrue(md.contains("### 原车 `com.wy.oem`"))
-        assertTrue(md.contains("- 广播：`com.wy.oem.SwitchReceiver`"))
-        assertTrue(md.contains("广告 `com.wy.junk`") && md.contains("已停用"))
-        assertTrue(md.contains("## 调试 / root 线索"))
-        // APK strings of key vendor apps (com.wwc2.main is on the dig list).
-        assertTrue(md.contains("### `com.wwc2.main`"))
-        assertTrue(md.contains("  - `com.wwc2.main.ACTION_ENTER_OEM`"))
-        assertTrue(md.contains("- 页面：`com.wwc2.main.MainActivity`"))
-        assertTrue(!md.contains("boring"))
-        assertTrue(report.facts.any { it.first == "adb" })
-    }
-
     /** Fake WWC2 CanbusProvider: original_screen returns one row. */
     class FakeCanbusProvider : android.content.ContentProvider() {
         override fun onCreate() = true
@@ -84,34 +50,76 @@ class ReconTest {
         override fun update(uri: android.net.Uri, v: android.content.ContentValues?, s: String?, a: Array<out String>?) = 0
     }
 
-    @Test
-    fun readsVendorContentProviders() {
-        org.robolectric.Robolectric.setupContentProvider(FakeCanbusProvider::class.java, "com.wwc2.canmcusdk.CanbusProvider")
-        val apk = ApkStringsTest.fakeApk(java.io.File.createTempFile("launcher", ".apk"),
-            listOf("content://com.wwc2.canmcusdk.CanbusProvider/original_screen"))
-        installPackage("com.wwc2.canmcusdk", "CanMcuSDK", listOf("com.wwc2.canmcusdk.MainActivity"), apk = apk)
-        val md = Recon.collect(app, ports = emptyList()).markdown
-        assertTrue(md.contains("## 厂商数据接口试读"))
-        assertTrue(md, md.contains("`content://com.wwc2.canmcusdk.CanbusProvider/original_screen`：1 行，列 name, value"))
-        assertTrue(md.contains("name=original_screen, value=1"))
-        // OEM-related code: build an APK from a real dex (OemSwitch.enterOriginalMedia); the report must list its call sequence.
-        val dexApk = java.io.File.createTempFile("oem-switch", ".apk")
-        java.util.zip.ZipOutputStream(dexApk.outputStream()).use { zip ->
+    private fun dexApk(resource: String): java.io.File {
+        val apk = java.io.File.createTempFile("dex", ".apk")
+        java.util.zip.ZipOutputStream(apk.outputStream()).use { zip ->
             zip.putNextEntry(java.util.zip.ZipEntry("classes.dex"))
-            zip.write(javaClass.classLoader!!.getResourceAsStream("oem-switch.dex")!!.readBytes())
+            zip.write(javaClass.classLoader!!.getResourceAsStream(resource)!!.readBytes())
             zip.closeEntry()
         }
-        installPackage("com.wwc2.main", "main", listOf("com.wwc2.main.MainActivity"), apk = dexApk)
-        val md2 = Recon.collect(app, ports = emptyList()).markdown
-        assertTrue(md2.contains("## 原车相关代码（只读反汇编）"))
-        assertTrue(md2, md2.contains("- `com.wwc2.fake.OemSwitch.enterOriginalMedia`"))
-        assertTrue(md2.contains("`str \"original_screen\"` → `call Map.put`"))
+        return apk
+    }
+
+    /** The one report: only what is not already known, the event log since the last copy, and the read-only code analysis. */
+    @Test
+    fun reportShowsOnlyNewThings() {
+        org.robolectric.Robolectric.setupContentProvider(FakeCanbusProvider::class.java, "com.wwc2.canmcusdk.CanbusProvider")
+        installPackage("com.wwc2.main", "main", listOf("com.wwc2.main.MainActivity"), apk = dexApk("oem-switch.dex"))
+        installPackage("com.wwc2.canmcusdk", "CanMcuSDK", listOf("com.wwc2.canmcusdk.MainActivity"), apk = dexApk("recon-extra.dex"))
+        installPackage("com.wy.same", "没变", listOf("com.wy.same.Main"))
+        EventLog.clear(app)
+        val t0 = 1_762_000_000_000L
+        EventLog.append(app, "广播", "com.wwc2.OLD", t0)
+        EventLog.append(app, "广播", "android.intent.action.SIG_STR · x=1", t0 + 20_000)
+        EventLog.append(app, "广播", "com.wwc2.APK_TO_MAIN · cmd=7", t0 + 30_000)
+        val targets = ReconTargets.parse("""{"packages":["com.wwc2.main","com.wwc2.canmcusdk"],
+            "code":[{"name":"原车画面切换","pattern":"original_screen|switchOriginalMenu"}],
+            "strings":"original|ACTION_SWITCH",
+            "providers":["content://com.wwc2.canmcusdk.CanbusProvider/original_screen","content://com.wwc2.canmcusdk.CanbusProvider/car_info"],
+            "sites":[{"name":"发广播的地方","call":"\\.sendBroadcast$"}],
+            "constants":"AvinInterface","settings":"zzz_none"}""", "测试")!!
+        val known = ReconKnown.parse("""{"system":"${android.os.Build.DISPLAY}",
+            "versions":{"com.wwc2.main":"1.0","com.wy.same":"1.0","com.wwc2.canmcusdk":"0.9","com.wy.gone":"2.0"},
+            "methods":["com.wwc2.fake.OemSwitch.enterOriginalMedia"],
+            "providers":["content://com.wwc2.canmcusdk.CanbusProvider/car_info"],
+            "strings":["enter_original_media"],
+            "ignoreEvents":[{"name":"手机信号","pattern":"SIG_STR"}]}""", "测试")!!
+        val md = Recon.report(app, targets, known, eventsSinceMs = t0 + 10_000).markdown
+
+        // Changes only: the updated and the removed app; unchanged apps and the system are not repeated.
+        assertTrue(md, md.contains("- 应用更新：`com.wwc2.canmcusdk` 0.9 → 1.0"))
+        assertTrue(md.contains("- 应用没了（卸载或停用后不可见）：`com.wy.gone`"))
+        assertTrue(md.contains("### `com.wwc2.canmcusdk` 1.0"))
+        assertTrue(!md.contains("com.wy.same") && !md.contains("系统版本："))
+        // Events since the last copy; known noise only counted.
+        assertTrue(md.contains("com.wwc2.APK_TO_MAIN · cmd=7"))
+        assertTrue(!md.contains("com.wwc2.OLD") && !md.contains("SIG_STR"))
+        assertTrue(md.contains("已知、省略：手机信号 1 条"))
+        // Known method left out, new ones listed (found by the called method's name).
+        assertTrue(!md.contains("- `com.wwc2.fake.OemSwitch.enterOriginalMedia`"))
+        assertTrue(md.contains("- `com.wwc2.fake.Tap.onOriginalClick`"))
+        assertTrue(md.contains("（另有 1 个已知方法省略）"))
+        assertTrue(md.contains("- `com.wwc2.fake.Tap.onOriginalClick` → `sendBroadcast`：`com.wwc2.main.ACTION_SWITCH_SOURCE` `source`"))
+        assertTrue(md.contains("`SWITCH_ORIGINAL=33 (0x21)`"))
+        // Known strings and known provider query results are not repeated; getType is always tried.
+        assertTrue(!md.contains("`enter_original_media`"))
+        assertTrue(md, md.contains("`content://com.wwc2.canmcusdk.CanbusProvider/original_screen`：query：1 行，列 name, value"))
+        assertTrue(md.contains("`content://com.wwc2.canmcusdk.CanbusProvider/car_info`：getType："))
+        // Nothing of the old full report.
+        assertTrue(!md.contains("## 厂商应用") && !md.contains("ro.build.type") && !md.contains("## AOSP"))
+
+        // Without the known list everything counts as new, and the report says so.
+        val all = Recon.report(app, targets, ReconKnown.NONE, null).markdown
+        assertTrue(all.contains("已知列表没下载到"))
+        assertTrue(all.contains("- `com.wwc2.fake.OemSwitch.enterOriginalMedia`") && all.contains("com.wwc2.OLD"))
+        EventLog.clear(app)
     }
 
     @Test
     fun localShareServesReportsReadOnly() {
-        var full: String? = null
-        val share = LocalShare(report = { "# 报告 <b>" }, full = { full }, port = 0)
+        var copied = 0
+        var md: String? = null
+        val share = LocalShare(report = { md }, onCopied = { copied++ }, port = 0)
         try {
             val base = "http://127.0.0.1:${share.port}"
             fun get(path: String): Pair<Int, String> {
@@ -121,16 +129,21 @@ class ReconTest {
             }
             assertEquals(404, get("/").first)
             assertEquals(404, get("/wrong/").first)
+            // While generating: refreshes itself, report.md not ready yet.
+            assertTrue(get("/${share.secret}/").second.contains("http-equiv=\"refresh\""))
+            assertEquals(503, get("/${share.secret}/report.md").first)
+            md = "# 报告 <b>"
             val (code, page) = get("/${share.secret}/")
             assertEquals(200, code)
             assertTrue("report must be escaped", page.contains("# 报告 &lt;b&gt;"))
+            assertTrue("one report only", !page.contains("完整报告") && !page.contains("重点报告"))
             assertTrue("no token / upload form any more", !page.contains("<form") && !page.contains("令牌"))
             assertEquals("# 报告 <b>", get("/${share.secret}/report.md").second)
-            // The full report only appears once it has been generated.
+            // Copying tells the app, so the next report's event log continues from here.
+            assertEquals(0, copied)
+            assertEquals(200, get("/${share.secret}/copied").first)
+            assertEquals(1, copied)
             assertEquals(404, get("/${share.secret}/full.md").first)
-            full = "# 完整"
-            assertEquals("# 完整", get("/${share.secret}/full.md").second)
-            assertTrue(get("/${share.secret}/").second.contains("完整报告"))
             // Nothing accepts uploads.
             val c = URL("$base/${share.secret}/token").openConnection() as HttpURLConnection
             c.requestMethod = "POST"

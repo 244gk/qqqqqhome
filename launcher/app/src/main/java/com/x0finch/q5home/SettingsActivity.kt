@@ -52,14 +52,9 @@ class SettingsActivity : Activity() {
     /** Download progress 0–100; null means not downloading. */
     private var downloadProgress: Int? = null
     // Head-unit survey
-    @Volatile private var report: Recon.Report? = null
-    private var reconRunning = false
     private var share: LocalShare? = null
-    /** The most recent focused report (shown at the top of the phone's QR-code web page). */
+    /** The report shown on the phone's QR-code web page (null while it is being generated). */
     @Volatile private var lastMarkdown: String? = null
-    /** The full report, generated on request; shown below the focused report on the web page. */
-    @Volatile private var lastFull: String? = null
-    private var generatingFull = false
     // GPS & 4G
     private val signal by lazy { SignalCheck(this) }
     private val signalViews = mutableMapOf<String, TextView>()
@@ -680,95 +675,46 @@ class SettingsActivity : Activity() {
     // ---- Head-unit survey ----
 
     private fun renderRecon() {
-        header("车机摸底", "只读：查系统、调试线索和原车 / CarPlay 组件，不会改动车机")
-        val r = report
-        if (r == null) {
-            if (!reconRunning) {
-                reconRunning = true
-                Thread {
-                    val result = runCatching { Recon.collect(this, deep = false) }
-                    runOnUiThread {
-                        reconRunning = false
-                        report = result.getOrNull()
-                        if (result.isFailure) overlay.snackbar("摸底出错：${result.exceptionOrNull()?.message}")
-                        if (section == SECTION_RECON) render()
-                    }
-                }.start()
-            }
-            tilesRow(tile(R.drawable.ui_refresh, "正在摸底…", sub = "读取系统信息和所有应用，几秒钟").first to 1f)
-            return
-        }
-
-        // Scanning the QR code and copying the report is the only way to share it (nothing is uploaded), so that card comes first
-        // (and the QR code stays on screen when it appears).
+        header("车机摸底", "只读：后台只听不发，扫码拿一份只有新内容的报告")
+        // Scanning the QR code and copying the report is the only way to share it (nothing is uploaded), so that card comes first.
         card(shareRow())
-        val fullStatus = when {
-            generatingFull -> "正在生成（要读所有应用，可能几十秒）…"
-            lastFull != null -> "已生成：扫码网页里「重点报告」下面就是完整报告"
-            else -> "全部应用、系统属性、调试线索等，比较长；一般不需要。生成后在扫码网页里复制"
+        val sentAt = reconPrefs().getLong(KEY_EVENTS_COPIED, 0L).takeIf { it > 0 }
+        val events = EventLog.lines(this, sentAt)
+        val eventStatus = when {
+            events.isEmpty() -> "后台一直在听（只听不发）。在车上操作一轮后扫码，事件记录就在报告里"
+            else -> "${if (sentAt != null) "上次复制报告之后" else "已"}记录 ${events.size} 条，从 ${events.first().substring(5, 16)} 起，都会写进报告"
         }
-        tilesRow(tile(R.drawable.ui_info, "完整报告", sub = fullStatus, subLines = 3,
-            action = Ui.pill(this, if (generatingFull) "生成中…" else if (lastFull != null) "重新生成" else "生成") { generateFull() }.apply {
-                isEnabled = !generatingFull
-                alpha = if (isEnabled) 1f else 0.4f
-            }).first to 1f)
-        val events = EventLog.lines(this)
-        val eventStatus = if (events.isEmpty()) "后台一直在听（只听不发），还没有记录。在车上操作一轮后，扫码网页里复制「事件记录」"
-            else "已记录 ${events.size} 条，从 ${events.first().substring(5, 16)} 起。操作完车机后，在扫码网页里复制「事件记录」"
-        tilesRow(tile(R.drawable.ui_info, "事件记录", sub = eventStatus, subLines = 3,
+        val eventTile = tile(R.drawable.ui_info, "事件记录", sub = eventStatus, subLines = 3,
             action = Ui.pill(this, "清空") {
                 Menus.confirm(overlay, this, "清空事件记录", "只删 q5home 自己记下的事件，车机不受影响。", "清空", danger = true) {
                     EventLog.clear(this)
-                    EventRecorder.note(this, "提示", "事件记录已清空")
+                    reconPrefs().edit().remove(KEY_EVENTS_COPIED).apply()
                     render()
                 }
             }.apply {
-                isEnabled = events.isNotEmpty()
+                isEnabled = EventLog.lines(this@SettingsActivity).isNotEmpty()
                 alpha = if (isEnabled) 1f else 0.4f
-            }).first to 1f)
-        card(*r.facts.map { (title, value) -> info(title, value) }.toTypedArray(), title = "要点")
-
-        val shown = r.candidates.take(12)
-        if (shown.isEmpty()) {
-            card(row(R.drawable.ui_info, "没找到明显的候选", "完整列表在报告里", null), title = "可能的入口（点「打开」试试）")
+            }).first
+        if (EventRecorder.usageAllowed(this)) {
+            tilesRow(eventTile to 1f, tile(R.drawable.ui_info, "前台应用记录", value = "已开启",
+                sub = "报告里会写出每次切到前台的应用和页面").first to 1f)
         } else {
-            card(*shown.map { candidateRow(it) }.toTypedArray(), title = "可能的入口（点「打开」试试）")
-            if (r.candidates.size > shown.size) hint("还有 ${r.candidates.size - shown.size} 个，见完整报告。")
+            tilesRow(eventTile to 1f, tile(R.drawable.ui_info, "前台应用记录", value = "没开启",
+                sub = "在系统设置里给 q5home 打开「使用情况访问权限」，才能记下切原车时前台是哪个应用和页面。开不开由你决定",
+                subLines = 4,
+                action = Ui.pill(this, "打开系统权限页") {
+                    runCatching { startActivity(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS)) }
+                        .onFailure { overlay.snackbar("车机没有这个设置页面") }
+                }).first to 1f)
         }
-
-        hint("事件记录：q5home 运行时在后台只听不发，记下广播、厂商数据接口的变化、系统设置和属性的变化，存在 q5home 自己的文件里（最多 2 MB）。" +
-            "被杀掉的那段时间没有记录，报告里能看到每次重新启动的时间。")
-        hint("重点报告：只看仓库 config/recon-targets.json 指定的应用、代码和接口（生成时自动下载最新的，改分析方向不用更新应用），" +
-            "只读，不改车机，也不会上传到任何地方。手机扫码打开的网页最上面就是重点报告，点「复制全部」发出去就行。" +
-            "临时网页只在这一页开着时运行，15 分钟后自动关闭。")
-    }
-
-    private fun candidateRow(c: Recon.Candidate): View {
-        val texts = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        texts.addView(Ui.text(this, "${c.kind} · ${c.label}", 17f))
-        texts.addView(Ui.text(this, c.spec, 13f, Ui.TEXT_DIM), LinearLayout.LayoutParams(-2, -2).apply { topMargin = dp(4) })
-        val buttons = LinearLayout(this)
-        buttons.addView(Ui.pill(this, "打开") {
-            if (!Targets.launch(this, c.spec)) overlay.snackbar("打不开：${c.spec}")
-        })
-        val setAs: (() -> Unit)? = when (c.kind) {
-            "原车" -> { { config.setOem(c.spec); overlay.snackbar("原车入口已改为 ${c.label}") } }
-            "CarPlay" -> { { config.setCarplay(c.spec); overlay.snackbar("CarPlay 已改为 ${c.label}") } }
-            else -> null
-        }
-        setAs?.let { action ->
-            buttons.addView(Ui.pill(this, "设为${c.kind}") { action(); render() }.apply {
-                (layoutParams as LinearLayout.LayoutParams).marginStart = dp(10)
-            })
-        }
-        return rowWith(null, texts, buttons)
+        hint("只读，不改车机，不上传。报告只列之前没见过的内容；临时网页 15 分钟后自动关闭。")
     }
 
     private fun shareRow(): View {
         val s = share?.takeUnless { it.closed }
         val ip = DebugAccess.ipAddress(this)
         if (s == null || ip == null) {
-            return row(R.drawable.ui_wifi, "手机扫码", if (ip == null) "车机没联网，手机打不开" else "车机开一个临时网页：手机上看重点报告，可以直接复制发出去",
+            return row(R.drawable.ui_wifi, "手机扫码", if (ip == null) "车机没联网，手机打不开" else "车机开一个临时网页：手机上看报告，可以直接复制发出去",
                 Ui.pill(this, "生成二维码") {
                     if (ip == null) { overlay.snackbar("车机没联网"); return@pill }
                     startShare()
@@ -805,18 +751,24 @@ class SettingsActivity : Activity() {
 
     private fun startShare() {
         stopShare()
-        // The web page shows the focused report at the top: generate it in the background (tens of seconds); the page refreshes
-        // itself until it is ready.
-        if (lastMarkdown == null) Thread {
-            runCatching { Recon.focused(this, ReconTargets.load()) }.onSuccess { lastMarkdown = it.markdown }
+        // Generate the report in the background (reading vendor code takes a while); the web page refreshes itself until it is ready.
+        lastMarkdown = null
+        val since = reconPrefs().getLong(KEY_EVENTS_COPIED, 0L).takeIf { it > 0 }
+        val generatedAt = System.currentTimeMillis()
+        Thread {
+            val r = runCatching {
+                val known = ReconKnown.load(cache = ReconKnown.cacheFile(this))
+                EventRecorder.reloadKnown(this) // what is known not to matter is no longer recorded at all
+                Recon.report(this, ReconTargets.load(), known, since, generatedAt)
+            }
+            lastMarkdown = r.getOrNull()?.markdown ?: "生成报告出错：${r.exceptionOrNull()}"
         }.start()
         share = runCatching {
-            LocalShare(report = { lastMarkdown }, full = { lastFull }, events = { since ->
-                if (EventLog.lines(this).isEmpty()) null
-                else EventLog.markdown(this, since, if (since == null) "事件记录（全部）" else "事件记录（最近 30 分钟）")
+            // Copied / downloaded: the next report's event log continues from this report.
+            LocalShare(report = { lastMarkdown }, onCopied = {
+                if (lastMarkdown != null) reconPrefs().edit().putLong(KEY_EVENTS_COPIED, generatedAt).apply()
             })
-        }
-            .onFailure { overlay.snackbar("开不了临时网页：${it.message}") }.getOrNull()
+        }.onFailure { overlay.snackbar("开不了临时网页：${it.message}") }.getOrNull()
         // Close automatically when time is up (the web page side also rejects requests after the timeout).
         val started = share
         root.postDelayed({
@@ -830,21 +782,7 @@ class SettingsActivity : Activity() {
         share = null
     }
 
-    /** The full report reads every APK, which may take tens of seconds on the head unit; it then appears on the QR web page. */
-    private fun generateFull() {
-        if (generatingFull) return
-        generatingFull = true
-        render()
-        Thread {
-            val result = runCatching { Recon.collect(this) }
-            runOnUiThread {
-                generatingFull = false
-                result.onSuccess { lastFull = it.markdown }
-                overlay.snackbar(if (result.isSuccess) "完整报告已生成，扫码网页里可以复制" else "生成失败：${result.exceptionOrNull()?.message}")
-                if (section == SECTION_RECON) render()
-            }
-        }.start()
-    }
+    private fun reconPrefs() = getSharedPreferences("recon", MODE_PRIVATE)
 
     /** Storage usage bar. */
     private class Meter(context: android.content.Context, private val fraction: Float) : View(context) {
@@ -1124,6 +1062,8 @@ class SettingsActivity : Activity() {
         const val SECTION_ADVANCED = "advanced"
         const val SECTION_UPDATE = "update"
         const val SECTION_RECON = "recon"
+        /** When the owner last copied the recon report: the next report's event log starts there. */
+        private const val KEY_EVENTS_COPIED = "events_copied_ms"
         const val SECTION_SIGNAL = "signal"
         private const val REQ_SIGNAL_PERMS = 10
         private const val REQ_CARPLAY = 1

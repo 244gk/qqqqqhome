@@ -59,6 +59,12 @@ class Config(private val context: Context) {
         val error = importFile()
         // When not set manually (or left blank), re-detect every time so a later-installed ZLINK / DiPlay is found too.
         carplay = prefs.getString(KEY_CARPLAY, null)?.ifBlank { null } ?: Targets.findCarPlay(context)
+        // Once: the old auto-detection could store an app whose name merely contains 原车 / oem; the OEM tile now opens the stock
+        // home "主页" (the owner's choice). Later manual choices are kept.
+        if (!prefs.getBoolean(KEY_OEM_HOME_FIX, false)) {
+            val home = Targets.stockHome(context)
+            prefs.edit().apply { if (home != null) putString(KEY_OEM, home) }.putBoolean(KEY_OEM_HOME_FIX, true).apply()
+        }
         oem = prefs.getString(KEY_OEM, null)?.ifBlank { null } ?: Targets.findOem(context)
         dock = prefs.getString(KEY_DOCK, null)?.let(::parseDock) ?: defaultDock()
         autoCarplay = prefs.getBoolean(KEY_AUTO_CARPLAY, false)
@@ -186,6 +192,7 @@ class Config(private val context: Context) {
         private const val DEFAULT_TITLE = "Audi Q5"
         private const val KEY_CARPLAY = "carplay"
         private const val KEY_OEM = "oem"
+        private const val KEY_OEM_HOME_FIX = "oem_home_fix_v1"
         private const val KEY_DOCK = "dock_v2"
         private const val KEY_AUTO_CARPLAY = "auto_carplay"
         private const val KEY_WALLPAPER = "wallpaper"

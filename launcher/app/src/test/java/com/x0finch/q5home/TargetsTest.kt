@@ -34,14 +34,27 @@ class TargetsTest {
         assertNotNull(Targets.icon(context, Targets.SYSTEM_SETTINGS))
     }
 
-    /** When no app is named like the OEM screen ("original car"), a WWC2 head unit falls back to the factory Home app (the Android box launcher, which contains the OEM media). */
+    /** The OEM tile opens the WWC2 stock home "主页" (its "原车媒体" switches to the OEM screen), even when another app is named like 原车. */
     @Test
-    fun oemFallsBackToWwc2Home() {
+    fun oemPrefersWwc2Home() {
+        FakeApps.install(context, FakeApps.OEM to "原车")
+        assertEquals("without the stock home, keywords still work", FakeApps.OEM, Targets.findOem(context))
         FakeApps.install(context, "com.wwc2.main/com.wwc2.main.MainActivity" to "main",
             "com.wwc2.launcher/com.wwc2.launcher.entry.MainActivity" to "主页")
         assertEquals("com.wwc2.launcher/com.wwc2.launcher.entry.MainActivity", Targets.findOem(context))
-        FakeApps.install(context, FakeApps.OEM to "原车")
-        assertEquals(FakeApps.OEM, Targets.findOem(context))
+    }
+
+    /** Once, an OEM entry stored by the old detection is replaced by "主页"; a choice made afterwards is kept. */
+    @Test
+    fun storedOemMovesToStockHomeOnce() {
+        FakeApps.install(context, FakeApps.OEM to "原车", "com.wwc2.launcher/com.wwc2.launcher.entry.MainActivity" to "主页")
+        context.getSharedPreferences("home", android.content.Context.MODE_PRIVATE).edit().putString("oem", FakeApps.OEM).commit()
+        val config = Config(context)
+        config.reload()
+        assertEquals("com.wwc2.launcher/com.wwc2.launcher.entry.MainActivity", config.oem)
+        config.setOem(FakeApps.OEM)
+        config.reload()
+        assertEquals(FakeApps.OEM, config.oem)
     }
 
     @Test

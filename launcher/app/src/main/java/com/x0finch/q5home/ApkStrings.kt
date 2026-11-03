@@ -49,7 +49,7 @@ object ApkStrings {
             !s.startsWith("android.permission.") && !s.startsWith("java.") && !s.startsWith("javax.")
     }
 
-    /** After excluding library code / built-in Android constants, filters with [pattern] (used for "related strings" in the focused report). */
+    /** After excluding library code / built-in Android constants, filters with [pattern] (used for "related strings" in the report). */
     fun matching(pattern: Regex): (String) -> Boolean = { s ->
         s.length in 2..120 && s.none { it == ' ' || it == '\n' } && !s.startsWith("\$this\$") &&
             !LIBRARY.containsMatchIn(s) && !NOISE.containsMatchIn(s) && pattern.containsMatchIn(s)

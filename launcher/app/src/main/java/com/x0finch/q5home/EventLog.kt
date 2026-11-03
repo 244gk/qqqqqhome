@@ -8,8 +8,9 @@ import java.util.Date
 import java.util.Locale
 
 /**
- * The recon event log: one line per event, written immediately to q5home's own private file so nothing is lost if the process
- * is killed. Capped at [MAX_BYTES]; when it grows past that the oldest part is dropped (keeps the newest [KEEP_BYTES]).
+ * The recon event log: one line per event in q5home's own private file. Lines are collected in memory and written in batches
+ * (every [FLUSH_MS], or at [FLUSH_LINES] lines, or right away for important lines such as a process start or the screen going off),
+ * so the file is not written on every event. Capped at [MAX_BYTES]; past that the oldest part is dropped (keeps the newest [KEEP_BYTES]).
  * Read-only towards the head unit: this only ever writes q5home's own file.
  *
  * Line format: `2026-11-02 09:35:12.345  类型  内容`.
@@ -17,22 +18,47 @@ import java.util.Locale
 object EventLog {
     const val MAX_BYTES = 2L * 1024 * 1024
     const val KEEP_BYTES = 1L * 1024 * 1024
+    const val FLUSH_MS = 30_000L
+    const val FLUSH_LINES = 100
     private const val MAX_LINE = 600
     private val format = object : ThreadLocal<SimpleDateFormat>() {
         override fun initialValue() = SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.US)
     }
+    private val pending = StringBuilder()
+    private var pendingLines = 0
+    private var pendingFile: File? = null
+    private var lastFlush = 0L
 
     fun file(context: Context) = File(File(context.filesDir, "recon"), "events.log")
 
+    /** Adds a line; it reaches the file with the next batch, or immediately with [now] = true. */
     @Synchronized
-    fun append(context: Context, kind: String, text: String, nowMs: Long = System.currentTimeMillis()) {
+    fun append(context: Context, kind: String, text: String, nowMs: Long = System.currentTimeMillis(), now: Boolean = false) {
+        val f = file(context)
+        if (pendingFile != null && pendingFile != f) flushLocked()
+        pendingFile = f
+        if (lastFlush == 0L) lastFlush = System.currentTimeMillis()
+        pending.append(format.get()!!.format(Date(nowMs))).append("  ").append(kind).append("  ")
+            .append(text.replace('\n', ' ').take(MAX_LINE)).append('\n')
+        pendingLines++
+        if (now || pendingLines >= FLUSH_LINES || System.currentTimeMillis() - lastFlush >= FLUSH_MS) flushLocked()
+    }
+
+    /** Writes what is collected so far (called on a timer by the recorder, and before reading). */
+    @Synchronized
+    fun flush() = flushLocked()
+
+    private fun flushLocked() {
+        lastFlush = System.currentTimeMillis()
+        val f = pendingFile ?: return
+        if (pendingLines == 0) return
         runCatching {
-            val f = file(context)
             f.parentFile?.mkdirs()
-            val line = "${format.get()!!.format(Date(nowMs))}  $kind  ${text.replace('\n', ' ').take(MAX_LINE)}\n"
-            f.appendText(line, Charsets.UTF_8)
+            f.appendText(pending.toString(), Charsets.UTF_8)
             if (f.length() > MAX_BYTES) trim(f)
         }
+        pending.setLength(0)
+        pendingLines = 0
     }
 
     /** Keeps the newest [KEEP_BYTES], starting at a line boundary. */
@@ -49,6 +75,7 @@ object EventLog {
     /** All lines, oldest first; with [sinceMs], only lines at or after that time. */
     @Synchronized
     fun lines(context: Context, sinceMs: Long? = null): List<String> {
+        flushLocked()
         val all = runCatching { file(context).readLines(Charsets.UTF_8) }.getOrDefault(emptyList()).filter { it.isNotBlank() }
         if (sinceMs == null) return all
         return all.filter { (timeOf(it) ?: 0L) >= sinceMs }
@@ -58,20 +85,8 @@ object EventLog {
 
     @Synchronized
     fun clear(context: Context) {
+        pending.setLength(0)
+        pendingLines = 0
         runCatching { file(context).delete() }
-    }
-
-    /** Markdown for the web page: a short header and the lines in a code block. */
-    fun markdown(context: Context, sinceMs: Long?, title: String): String {
-        val lines = lines(context, sinceMs)
-        val sb = StringBuilder()
-        sb.appendLine("<!-- q5home-events v1 -->")
-        sb.appendLine("## $title（${lines.size} 条）")
-        sb.appendLine("q5home 在后台只听、只记，没有发送或改动任何东西。时间是车机时间。")
-        sb.appendLine()
-        sb.appendLine("```")
-        lines.forEach { sb.appendLine(it) }
-        sb.appendLine("```")
-        return sb.toString()
     }
 }

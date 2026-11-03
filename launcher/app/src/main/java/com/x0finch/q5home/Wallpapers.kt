@@ -58,7 +58,7 @@ object Wallpapers {
      * The wallpaper for the current setting; null for plain black. Auto-rotate picks from all wallpapers by time slot:
      * daily = day of the year (same as older versions); shorter frequencies = minutes elapsed this year ÷ frequency.
      */
-    fun current(context: Context, setting: String, calendar: Calendar = Calendar.getInstance(),
+    fun current(context: Context, setting: String, calendar: Calendar = TrueTime.calendar(),
                 intervalMinutes: Int = DEFAULT_INTERVAL, daylight: Boolean? = null): Wallpaper? {
         if (setting == NONE) return null
         val all = available(context)

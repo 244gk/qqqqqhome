@@ -33,7 +33,7 @@ object EventLog {
 
     /** Adds a line; it reaches the file with the next batch, or immediately with [now] = true. */
     @Synchronized
-    fun append(context: Context, kind: String, text: String, nowMs: Long = System.currentTimeMillis(), now: Boolean = false) {
+    fun append(context: Context, kind: String, text: String, nowMs: Long = TrueTime.now(), now: Boolean = false) {
         val f = file(context)
         if (pendingFile != null && pendingFile != f) flushLocked()
         pendingFile = f
@@ -72,16 +72,24 @@ object EventLog {
         f.writeBytes(bytes.copyOfRange(firstLine, bytes.size))
     }
 
-    /** All lines, oldest first; with [sinceMs], only lines at or after that time. */
+    /**
+     * All lines, in the order they were written; with [afterLine], only the lines after its last occurrence (the last line when the
+     * owner copied a report: robust to the clock jumping), else with [sinceMs], only lines at or after that time.
+     */
     @Synchronized
-    fun lines(context: Context, sinceMs: Long? = null): List<String> {
+    fun lines(context: Context, sinceMs: Long? = null, afterLine: String? = null): List<String> {
         flushLocked()
         val all = runCatching { file(context).readLines(Charsets.UTF_8) }.getOrDefault(emptyList()).filter { it.isNotBlank() }
+        if (afterLine != null) {
+            val i = all.lastIndexOf(afterLine)
+            if (i >= 0) return all.subList(i + 1, all.size)
+        }
         if (sinceMs == null) return all
         return all.filter { (timeOf(it) ?: 0L) >= sinceMs }
     }
 
-    fun timeOf(line: String): Long? = runCatching { format.get()!!.parse(line.take(23))?.time }.getOrNull()
+    /** When a line was written; lines stamped while the clock was 1024 weeks behind are corrected ([TrueTime]). */
+    fun timeOf(line: String): Long? = runCatching { format.get()!!.parse(line.take(23))?.time }.getOrNull()?.let(TrueTime::correct)
 
     @Synchronized
     fun clear(context: Context) {

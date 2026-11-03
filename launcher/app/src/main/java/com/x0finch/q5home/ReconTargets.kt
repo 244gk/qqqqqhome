@@ -212,6 +212,10 @@ class ReconKnown(
             ReconTargets.CodeGroup("电池状态", Regex("BATTERY_CHANGED")),
             ReconTargets.CodeGroup("USB / HDMI 状态", Regex("USB_STATE|HDMI_PLUGGED")),
             ReconTargets.CodeGroup("车辆数据 car_info 变化（每秒 5–20 次，一直在推）", Regex("CanbusProvider/car_info")),
+            ReconTargets.CodeGroup("WiFi / 网络连接过程", Regex("android\\.net\\.wifi\\.|CONNECTIVITY_CHANGE|INET_CONDITION_ACTION|CARRIER_CONFIG_CHANGED|POWER_SAVE_TEMP_WHITELIST")),
+            ReconTargets.CodeGroup("GPS 开关 / 定位状态", Regex("GPS_ENABLED_CHANGE|GPS_FIX_CHANGE|HIGH_POWER_REQUEST_CHANGE")),
+            ReconTargets.CodeGroup("切换前台时厂商的重复通知", Regex("CURRENT_PACKAGENAME|CurPkgName=|OldPkgName=|CurClsName=|OldClsName=")),
+            ReconTargets.CodeGroup("触摸屏幕", Regex("com\\.wwc2\\.touch\\.event|status=true, type=17")),
         )
 
         val NONE = ReconKnown(null, emptyMap(), emptySet(), emptySet(), emptySet(), DEFAULT_IGNORE, null)

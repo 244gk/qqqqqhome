@@ -112,7 +112,7 @@ object ReconReport {
      * The report as shown on the QR page: the prepared file + the event log. Never computes anything slow; if nothing is
      * prepared yet it says what the background work is doing (the page then refreshes itself).
      */
-    fun serve(context: Context, eventsSinceMs: Long?): String {
+    fun serve(context: Context, eventsSinceMs: Long?, afterLine: String? = null): String {
         val known = ReconKnown.cached(context)
         val self = runCatching { context.packageManager.getPackageInfo(context.packageName, 0).versionName }.getOrNull() ?: "?"
         val time = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.US)
@@ -120,11 +120,12 @@ object ReconReport {
         val md = StringBuilder()
         md.appendLine("<!-- q5home-recon v5 -->")
         md.appendLine("q5home $self，只读，没有改动车机。" + if (ready != null)
-            "报告在 ${time.format(Date(ready.lastModified()))} 后台准备好，事件记录到 ${time.format(Date())}。" else "")
+            "报告在 ${time.format(Date(TrueTime.correct(ready.lastModified())))} 后台准备好，事件记录到 ${time.format(TrueTime.date())}。" else "")
+        if (TrueTime.systemClockRolledBack()) md.appendLine("**车机系统时钟早了 1024 周**（自动时间用了 GPS 报的日期），报告里的时间已按真实日期纠正。")
         md.appendLine(if (known.source != null) "只列新内容：之前报告里已经有的（${known.source}）都省略了。"
             else "**已知列表没下载到，车机上也没有存过**，下面是全部内容，没有省略已知的。")
         md.appendLine()
-        md.append(Recon.eventsSection(context, known, eventsSinceMs))
+        md.append(Recon.eventsSection(context, known, eventsSinceMs, afterLine))
         if (ready != null) md.append(runCatching { ready.readText() }.getOrDefault("（读不了准备好的报告）\n"))
         else md.appendLine("## 其余部分还在后台准备\n${progress.ifEmpty { "车机启动后马上开始" }}（本页会自动刷新）\n")
         return md.toString()

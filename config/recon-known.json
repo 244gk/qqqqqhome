@@ -21,6 +21,22 @@
   {
    "name": "车辆数据 car_info 变化（每秒 5–20 次，一直在推）",
    "pattern": "CanbusProvider/car_info"
+  },
+  {
+   "name": "WiFi / 网络连接过程",
+   "pattern": "android\\.net\\.wifi\\.|CONNECTIVITY_CHANGE|INET_CONDITION_ACTION|CARRIER_CONFIG_CHANGED|POWER_SAVE_TEMP_WHITELIST"
+  },
+  {
+   "name": "GPS 开关 / 定位状态",
+   "pattern": "GPS_ENABLED_CHANGE|GPS_FIX_CHANGE|HIGH_POWER_REQUEST_CHANGE"
+  },
+  {
+   "name": "切换前台时厂商的重复通知",
+   "pattern": "CURRENT_PACKAGENAME|CurPkgName=|OldPkgName=|CurClsName=|OldClsName="
+  },
+  {
+   "name": "触摸屏幕",
+   "pattern": "com\\.wwc2\\.touch\\.event|status=true, type=17"
   }
  ],
  "system": "006_20_1.0.63_230322",

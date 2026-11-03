@@ -44,7 +44,7 @@ object Recon {
      * provider reads and the code analysis ([staticPart] if already prepared).
      */
     fun report(context: Context, targets: ReconTargets, known: ReconKnown, eventsSinceMs: Long?,
-               nowMs: Long = System.currentTimeMillis(), staticPart: String? = null): Report {
+               nowMs: Long = TrueTime.now(), staticPart: String? = null): Report {
         val md = StringBuilder()
         val now = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.US).format(Date(nowMs))
         val self = runCatching { context.packageManager.getPackageInfo(context.packageName, 0).versionName }.getOrNull() ?: "?"
@@ -73,9 +73,9 @@ object Recon {
     }
 
     /** The event log since [eventsSinceMs] (read when the report is shown: it is only a local file). */
-    fun eventsSection(context: Context, known: ReconKnown, eventsSinceMs: Long?): String {
+    fun eventsSection(context: Context, known: ReconKnown, eventsSinceMs: Long?, afterLine: String? = null): String {
         val md = StringBuilder()
-        val all = EventLog.lines(context, eventsSinceMs).sortedBy { EventLog.timeOf(it) ?: 0L }
+        val all = EventLog.lines(context, eventsSinceMs, afterLine).sortedBy { EventLog.timeOf(it) ?: 0L }
         val noise = known.ignoreEvents.associateWith { 0 }.toMutableMap()
         val events = all.filter { line ->
             val g = known.ignoreEvents.firstOrNull { it.pattern.containsMatchIn(line) }

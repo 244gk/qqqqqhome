@@ -281,7 +281,7 @@ class SignalCheck(private val context: Context) {
             return String.format(Locale.US, "看到 %d 颗 · 用于定位 %d 颗 · 最强 %.0f dB-Hz（%s）", sats.size, used, best, quality)
         }
 
-        fun fixText(location: Location?, firstFixMs: Int?, nowMs: Long = System.currentTimeMillis(),
+        fun fixText(location: Location?, firstFixMs: Int?, nowMs: Long = TrueTime.now(),
                     nowElapsedNs: Long = android.os.SystemClock.elapsedRealtimeNanos()): String {
             if (location == null) return "还没定位（在室外冷启动一般要 30 秒到几分钟）"
             val ageS = (HomeGps.ageMs(location, nowMs, nowElapsedNs) / 1000).coerceAtLeast(0)

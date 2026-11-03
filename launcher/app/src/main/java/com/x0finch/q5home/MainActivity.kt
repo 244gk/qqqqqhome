@@ -287,7 +287,7 @@ class MainActivity : Activity() {
      * The sunrise/sunset arc is also refreshed here.
      */
     private fun updateTrip() {
-        val now = System.currentTimeMillis()
+        val now = TrueTime.now()
         val reading = if (config.homeGps) HomeGps.reading(gps.last, now) else null
         // Speed from the CAN bus (the instrument cluster's value, also in tunnels) when the car reports it, else GPS.
         val car = freshCar()
@@ -404,7 +404,7 @@ class MainActivity : Activity() {
 
     /** Clock: the digits that changed roll up when the minute changes (replaced directly when the page is shown). */
     private fun updateClock(animate: Boolean) {
-        clock.setText(SimpleDateFormat("HH:mm", Locale.CHINA).format(Date()), animate)
+        clock.setText(SimpleDateFormat("HH:mm", Locale.CHINA).format(TrueTime.date()), animate)
     }
 
     private fun openGpsSettings() {
@@ -500,7 +500,7 @@ class MainActivity : Activity() {
     }
 
     private fun updateGreeting() {
-        val hour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
+        val hour = TrueTime.calendar().get(Calendar.HOUR_OF_DAY)
         val hello = when (hour) {
             in 5..10 -> "早上好"
             in 11..12 -> "中午好"
@@ -509,7 +509,7 @@ class MainActivity : Activity() {
             else -> "夜深了"
         }
         greeting.text = "$hello  ·  ${config.title}"
-        date.text = SimpleDateFormat("M月d日 EEEE", Locale.CHINA).format(Date())
+        date.text = SimpleDateFormat("M月d日 EEEE", Locale.CHINA).format(TrueTime.date())
     }
 
     /** Only re-decode the wallpaper when it changes (checked every minute; auto-rotate switches when due; newly downloaded online wallpapers also join the rotation). */

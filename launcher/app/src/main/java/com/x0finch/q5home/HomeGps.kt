@@ -78,13 +78,13 @@ class HomeGps(private val context: Context, private val onChange: (Location?) ->
          * How old a fix is. Uses the boot clock ([Location.getElapsedRealtimeNanos]) when the fix has it: it doesn't depend on
          * the date the GPS chip reports (on this head unit that date is 1024 weeks behind). Otherwise the corrected fix time.
          */
-        fun ageMs(l: Location, nowMs: Long = System.currentTimeMillis(),
+        fun ageMs(l: Location, nowMs: Long = TrueTime.now(),
                   nowElapsedNs: Long = SystemClock.elapsedRealtimeNanos()): Long =
             if (l.elapsedRealtimeNanos > 0 && nowElapsedNs >= l.elapsedRealtimeNanos) (nowElapsedNs - l.elapsedRealtimeNanos) / 1_000_000
             else nowMs - correctedTime(l.time, nowMs)
 
         /** Returns null without a fresh fix. Heading is shown only while moving (GPS heading is unreliable when stationary). */
-        fun reading(location: Location?, nowMs: Long = System.currentTimeMillis(),
+        fun reading(location: Location?, nowMs: Long = TrueTime.now(),
                     nowElapsedNs: Long = SystemClock.elapsedRealtimeNanos()): Reading? {
             val l = location ?: return null
             if (ageMs(l, nowMs, nowElapsedNs) > STALE_MS) return null
@@ -96,7 +96,7 @@ class HomeGps(private val context: Context, private val onChange: (Location?) ->
         }
 
         /** Single-line text version (speed · heading · altitude); returns null without a fresh fix. */
-        fun text(location: Location?, nowMs: Long = System.currentTimeMillis(),
+        fun text(location: Location?, nowMs: Long = TrueTime.now(),
                  nowElapsedNs: Long = SystemClock.elapsedRealtimeNanos()): String? {
             val r = reading(location, nowMs, nowElapsedNs) ?: return null
             val parts = listOfNotNull(r.speedKmh?.let { "$it km/h" }, r.detail.ifEmpty { null })

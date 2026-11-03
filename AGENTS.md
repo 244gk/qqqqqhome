@@ -159,6 +159,10 @@ Add package names here as they are identified:
     Wi-Fi is down), runs the slow code analysis (redone only when a config, a vendor app or q5home changes) and reads changes,
     vehicle data (read-only `call("xxx_info")` getters), properties, settings and provider reads into one file. **Scanning the QR code
     computes nothing** (the owner's rule): it serves that file plus the event log at once.
+    Head-unit clock: with automatic time on, the unit takes the GPS date and can land exactly 1024 weeks in the past (seen: 2007).
+    `TrueTime` corrects any time before 2025 by adding 1024 weeks (`HomeGps.ROLLOVER_MS`); use `TrueTime.now()` / `date()` /
+    `calendar()` for anything shown or logged, never `System.currentTimeMillis()` directly. The event log after a copied report is
+    found by the last line copied (`events_copied_line`), not by time, so a clock jump never drops events.
     Code analysis covers only the vendor's own classes ("vendorClasses"), never bundled libraries.
     **There is exactly one report** (the owner's rule: no focused / full split) and it shows **only what is new**:
     `config/recon-known.json` lists what earlier reports already showed (system build, vendor app versions, disassembled methods,

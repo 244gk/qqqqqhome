@@ -392,7 +392,7 @@ class SettingsActivity : Activity() {
     /** Right column of the rotation card: split day / night wallpapers by sunrise and sunset (whole column clickable, toggle top-right). */
     private fun sunColumn(): View {
         val loc = Sun.location(this)
-        val times = loc?.let { Sun.times(it.first, it.second, System.currentTimeMillis()) }
+        val times = loc?.let { Sun.times(it.first, it.second, TrueTime.now()) }
         val fmt = SimpleDateFormat("H:mm", Locale.CHINA)
         val sub = when {
             times != null -> "今天白天 ${fmt.format(Date(times.first))} – ${fmt.format(Date(times.second))}"
@@ -677,16 +677,16 @@ class SettingsActivity : Activity() {
         // Scanning the QR code and copying the report is the only way to share it (nothing is uploaded), so that card comes first.
         card(shareRow())
         val sentAt = reconPrefs().getLong(KEY_EVENTS_COPIED, 0L).takeIf { it > 0 }
-        val events = EventLog.lines(this, sentAt)
+        val events = EventLog.lines(this, sentAt, reconPrefs().getString(KEY_EVENTS_COPIED_LINE, null))
         val eventStatus = when {
             events.isEmpty() -> "后台一直在听（只听不发）。在车上操作一轮后扫码，事件记录就在报告里"
-            else -> "${if (sentAt != null) "上次复制报告之后" else "已"}记录 ${events.size} 条，从 ${events.first().substring(5, 16)} 起，都会写进报告"
+            else -> "${if (sentAt != null) "上次复制报告之后" else "已"}记录 ${events.size} 条，从 ${EventLog.timeOf(events.first())?.let { java.text.SimpleDateFormat("MM-dd HH:mm", java.util.Locale.US).format(java.util.Date(it)) } ?: events.first().substring(5, 16)} 起，都会写进报告"
         }
         val eventTile = tile(R.drawable.ui_info, "事件记录", sub = eventStatus, subLines = 3,
             action = Ui.pill(this, "清空") {
                 Menus.confirm(overlay, this, "清空事件记录", "只删 q5home 自己记下的事件，车机不受影响。", "清空", danger = true) {
                     EventLog.clear(this)
-                    reconPrefs().edit().remove(KEY_EVENTS_COPIED).apply()
+                    reconPrefs().edit().remove(KEY_EVENTS_COPIED).remove(KEY_EVENTS_COPIED_LINE).apply()
                     render()
                 }
             }.apply {
@@ -752,9 +752,12 @@ class SettingsActivity : Activity() {
         // The whole report was prepared in the background (ReconReport): serving it only reads that file and the event log,
         // so the page shows at once. Copying / downloading moves the start of the next report's event log to now.
         val since = reconPrefs().getLong(KEY_EVENTS_COPIED, 0L).takeIf { it > 0 }
+        val sinceLine = reconPrefs().getString(KEY_EVENTS_COPIED_LINE, null)
         share = runCatching {
-            LocalShare(report = { ReconReport.serve(this, since) }, refreshing = { !ReconReport.isReady(this) }, onCopied = {
-                reconPrefs().edit().putLong(KEY_EVENTS_COPIED, System.currentTimeMillis()).apply()
+            LocalShare(report = { ReconReport.serve(this, since, sinceLine) }, refreshing = { !ReconReport.isReady(this) }, onCopied = {
+                // Remember the last line too: the next report continues after it even if the clock jumps.
+                reconPrefs().edit().putLong(KEY_EVENTS_COPIED, TrueTime.now())
+                    .putString(KEY_EVENTS_COPIED_LINE, EventLog.lines(this).lastOrNull()).apply()
             })
         }.onFailure { overlay.snackbar("开不了临时网页：${it.message}") }.getOrNull()
         if (!ReconReport.isReady(this)) ReconReport.schedule(this, 0)
@@ -1064,6 +1067,7 @@ class SettingsActivity : Activity() {
         const val SECTION_RECON = "recon"
         /** When the owner last copied the recon report: the next report's event log starts there. */
         private const val KEY_EVENTS_COPIED = "events_copied_ms"
+        private const val KEY_EVENTS_COPIED_LINE = "events_copied_line"
         const val SECTION_SIGNAL = "signal"
         private const val REQ_SIGNAL_PERMS = 10
         private const val REQ_CARPLAY = 1

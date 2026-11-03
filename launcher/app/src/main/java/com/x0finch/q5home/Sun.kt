@@ -63,13 +63,13 @@ object Sun {
     }
 
     /** Whether it's daytime now: by sunrise/sunset if a location is known, otherwise 7:00–19:00. */
-    fun isDaylight(context: Context, now: Long = System.currentTimeMillis()): Boolean {
+    fun isDaylight(context: Context, now: Long = TrueTime.now()): Boolean {
         val loc = location(context)
         val t = loc?.let { times(it.first, it.second, now) }
         if (t != null) return now in t.first until t.second
         if (loc != null) {
             // Polar day / night: check the sun's noon elevation — high-latitude summer counts as day.
-            val month = Calendar.getInstance().get(Calendar.MONTH)
+            val month = Calendar.getInstance().apply { timeInMillis = now }.get(Calendar.MONTH)
             return (loc.first > 0) == (month in Calendar.APRIL..Calendar.SEPTEMBER)
         }
         val hour = Calendar.getInstance().apply { timeInMillis = now }.get(Calendar.HOUR_OF_DAY)

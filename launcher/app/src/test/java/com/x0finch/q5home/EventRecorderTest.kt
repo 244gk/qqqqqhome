@@ -50,6 +50,37 @@ class EventRecorderTest {
     }
 
     @Test
+    fun clockRolledBack1024WeeksIsCorrected() {
+        val real = 1_793_700_000_000L // 2026-11-03
+        val rolled = real - HomeGps.ROLLOVER_MS // 2007-03-20, what the head unit showed
+        assertEquals(real, TrueTime.correct(rolled))
+        assertEquals(real, TrueTime.correct(real))
+        assertEquals(0L, TrueTime.correct(0L))
+        // A line stamped with the rolled-back clock reads as the real time.
+        EventLog.clear(app)
+        EventLog.append(app, "广播", "rolled", rolled)
+        assertEquals(real, EventLog.timeOf(EventLog.lines(app).single()))
+        EventLog.clear(app)
+    }
+
+    @Test
+    fun eventsAfterTheCopiedLineSurviveAClockJump() {
+        EventLog.clear(app)
+        val t = 1_793_700_000_000L
+        EventLog.append(app, "广播", "before", t)
+        val marker = EventLog.lines(app).last()
+        // The clock jumps back after the report was copied; time filtering would drop these, the line marker keeps them.
+        EventLog.append(app, "广播", "after1", t - 3_600_000L)
+        EventLog.append(app, "广播", "after2", t - 3_500_000L)
+        val after = EventLog.lines(app, sinceMs = t, afterLine = marker)
+        assertEquals(2, after.size)
+        assertTrue(after[0].endsWith("after1"))
+        // A marker no longer in the log (trimmed / cleared) falls back to the time filter.
+        assertEquals(1, EventLog.lines(app, sinceMs = t, afterLine = "gone").size)
+        EventLog.clear(app)
+    }
+
+    @Test
     fun recordsBroadcastsWithExtrasAndFoldsRepeats() {
         EventLog.clear(app)
         EventRecorder.start(app, force = true)

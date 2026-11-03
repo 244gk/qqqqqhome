@@ -93,9 +93,13 @@ Add package names here as they are identified:
   - Configuration: SharedPreferences + a `config.json` that can be pushed via adb (see `Config.kt`, `Targets.kt`).
   - The OEM ("原车") tile sends `Targets.OEM_SWITCH` (`broadcast:wwc2.com.wangyong.car`, the stock "原车媒体" broadcast) when
     `com.wwc2.canmcusdk` is installed, else opens the stock home "主页"; `Config` set it once (`oem_switch_v2`), and a long-press choice
-    is kept. The car card (`CarData.kt`, slot CAR, right after the OEM tile) shows fuel, open doors / lids and rpm from the read-only
-    `CanbusProvider` `call("car_info")` getter, refreshed at most once a second while the home screen is shown; a tap opens the
-    stock "液晶仪表" (`com.wwc2.canbusapk`).
+    is kept. `CarData.kt` reads the read-only `CanbusProvider` getters `call("car_info")` / `call("air_info")` at most once a second
+    while the home screen is shown. Confirmed in the car: `RESIDUAL_OIL` is fuel in litres, `AVERAGE_SPEED` is the live vehicle speed
+    (km/h, the cluster's value), `ENGINE_SPEED` rpm, `DRIVER_SEAT_BELT` 1 = fastened (seen 0 parked / 1 driving), `HANDBRAKE_STATE`
+    1 = on; `CRUISING_RANGE` is 65535 (not reported). The driving card shows the CAN speed (GPS only as fallback) with an rpm bar
+    (`RpmBar`); the car card (slot CAR, right after the OEM tile) shows fuel and, in red, open doors / lids or moving with the
+    handbrake on / belt off, amber below 10 L; a tap opens the stock "液晶仪表" (`com.wwc2.canbusapk`). Parking sensor readings
+    (`radar_info`, 8 fields; whether the front ones exist is unconfirmed) are written to the recon event log when they change.
   - Home screen icons are in `Icons.kt` (Material Symbols vectors); tile = icon key + target; switching apps only changes the target.
   - Wallpapers are in `res/drawable-nodpi/wall_*.webp`, sources recorded in `CREDITS.md`; update it when adding wallpapers.
   - Online wallpapers: `OnlineWallpapers.kt` + `WallpaperJob.kt` (Wi-Fi only, once a day); storage limit 8 images / 6 MB,

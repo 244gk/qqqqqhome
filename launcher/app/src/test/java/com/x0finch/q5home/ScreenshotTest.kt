@@ -56,7 +56,8 @@ class ScreenshotTest {
         override fun onCreate() = true
         override fun call(method: String, arg: String?, extras: android.os.Bundle?): android.os.Bundle? =
             if (method == "car_info") android.os.Bundle().apply {
-                putInt("RESIDUAL_OIL", 57); putInt("ENGINE_SPEED", 0); putBoolean("TRUNK_DOOR", true)
+                putInt("RESIDUAL_OIL", 57); putInt("ENGINE_SPEED", 2300); putInt("AVERAGE_SPEED", 62); putInt("DRIVER_SEAT_BELT", 1)
+                putBoolean("TRUNK_DOOR", true)
             } else null
         override fun query(u: android.net.Uri, p: Array<out String>?, s: String?, a: Array<out String>?, o: String?) = null
         override fun getType(uri: android.net.Uri): String? = null
@@ -65,7 +66,7 @@ class ScreenshotTest {
         override fun update(uri: android.net.Uri, v: android.content.ContentValues?, s: String?, a: Array<out String>?) = 0
     }
 
-    /** On the WWC2 platform: the OEM tile switches directly, and the car card shows fuel and open doors / lids. */
+    /** On the WWC2 platform: the OEM tile switches directly, the driving card shows CAN speed and rpm, the car card fuel and warnings. */
     @Test
     fun homeOnWwc2() {
         RuntimeEnvironment.setQualifiers("w1280dp-h480dp-land-mdpi")
@@ -76,10 +77,11 @@ class ScreenshotTest {
         val activity = Robolectric.buildActivity(MainActivity::class.java).setup().get()
         repeat(40) {
             shadowOf(android.os.Looper.getMainLooper()).idleFor(java.time.Duration.ofMillis(100))
-            if (findText(activity.window.decorView, "油量 57") != null) return@repeat
+            if (findText(activity.window.decorView, "油量 57 L") != null) return@repeat
             Thread.sleep(50)
         }
-        org.junit.Assert.assertNotNull(findText(activity.window.decorView, "油量 57"))
+        org.junit.Assert.assertNotNull(findText(activity.window.decorView, "油量 57 L"))
+        org.junit.Assert.assertNotNull(findText(activity.window.decorView, "转速 2300"))
         org.junit.Assert.assertNotNull(findText(activity.window.decorView, "后备箱开着"))
         org.junit.Assert.assertNotNull(findText(activity.window.decorView, "切到原车画面，点屏幕返回"))
         shoot(activity, "home-wwc2")

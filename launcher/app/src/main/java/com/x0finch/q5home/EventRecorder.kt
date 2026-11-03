@@ -223,7 +223,12 @@ object EventRecorder {
                 app.contentResolver.registerContentObserver(Uri.parse("content://$a"), true, object : ContentObserver(h) {
                     override fun onChange(selfChange: Boolean, uri: Uri?) {
                         val text = (uri ?: Uri.parse("content://$a")).toString()
-                        log(app, "数据变化", text, key = text)
+                        if (text.endsWith("/radar_info")) {
+                            // Which parking sensors report anything (front ones exist only on some cars): log the readings,
+                            // via the same read-only getter the stock radar view uses.
+                            val readings = radarReadings(app, text)
+                            log(app, "雷达", readings, key = readings)
+                        } else log(app, "数据变化", text, key = text)
                         // Ignition on / off: (re)prepare the report a little later.
                         if (text.endsWith("/acc_status")) ReconReport.schedule(app)
                     }
@@ -232,6 +237,15 @@ object EventRecorder {
         }
         return authorities.size
     }
+
+    /** Non-zero parking sensor readings ("BACK_LEFT_RADAR=3, …") or "全部为 0". */
+    fun radarReadings(context: Context, uri: String): String = runCatching {
+        val b = context.contentResolver.call(Uri.parse(uri), "radar_info", null, null) ?: return@runCatching "读不到"
+        @Suppress("DEPRECATION")
+        val nonZero = b.keySet().sorted().filter { (b.get(it) as? Number)?.toInt()?.let { v -> v != 0 } == true }
+            .joinToString(", ") { "$it=${b.get(it)}" }
+        nonZero.ifEmpty { "全部为 0" }
+    }.getOrElse { "读不到：${it.javaClass.simpleName}" }
 
     private val TABLES = listOf(
         "system" to Settings.System.CONTENT_URI, "global" to Settings.Global.CONTENT_URI, "secure" to Settings.Secure.CONTENT_URI,

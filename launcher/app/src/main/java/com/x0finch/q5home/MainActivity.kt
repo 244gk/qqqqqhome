@@ -61,10 +61,30 @@ class MainActivity : Activity() {
     private val carData by lazy {
         CarData(this) { status ->
             carStatus = status
-            val (title, sub) = CarData.texts(status)
-            carViews?.let { (t, s) -> t.text = title; s.text = sub }
+            showCarCard()
+            updateTrip()
         }
     }
+    /** Engine speed bar under the speed on the driving card (only with CAN data). */
+    private val rpmBar by lazy { RpmBar(this) }
+
+    /** Car card texts; the second line is red for open doors / handbrake / belt, amber for low fuel. */
+    private fun showCarCard() {
+        val (title, sub, tone) = CarData.texts(carStatus)
+        carViews?.let { (t, s) ->
+            t.text = title
+            s.text = sub
+            s.setTextColor(when (tone) {
+                CarData.Tone.DANGER -> Ui.DANGER
+                CarData.Tone.WARN -> WARN_COLOR
+                CarData.Tone.NORMAL -> Ui.TEXT_DIM
+            })
+        }
+    }
+
+    /** Fresh CAN data (read within the last few seconds), or null. */
+    private fun freshCar(): CarData.Status? =
+        carStatus?.takeIf { android.os.SystemClock.elapsedRealtime() - it.at < CAR_FRESH_MS }
     private lateinit var root: View
     private lateinit var wallpaperView: ImageView
     private lateinit var scrim: View
@@ -153,6 +173,10 @@ class MainActivity : Activity() {
         gpsCard = findViewById(R.id.gpsCard)
         speedUnit = findViewById(R.id.speedUnit)
         trip = findViewById(R.id.trip)
+        (speedRow.parent as LinearLayout).let { card ->
+            card.addView(rpmBar.apply { visibility = View.GONE }, card.indexOfChild(speedRow) + 1,
+                LinearLayout.LayoutParams(-1, dp(4)).apply { topMargin = dp(8); bottomMargin = dp(2) })
+        }
         carplayCard = findViewById(R.id.firstTile)
         art = findViewById(R.id.art)
         carplaySub = findViewById(R.id.carplaySub)
@@ -265,11 +289,19 @@ class MainActivity : Activity() {
     private fun updateTrip() {
         val now = System.currentTimeMillis()
         val reading = if (config.homeGps) HomeGps.reading(gps.last, now) else null
-        val speedText = reading?.speedKmh?.toString()
+        // Speed from the CAN bus (the instrument cluster's value, also in tunnels) when the car reports it, else GPS.
+        val car = freshCar()
+        val canSpeed = car?.speed
+        val speedText = (canSpeed ?: reading?.speedKmh)?.toString()
         speedRow.visibility = if (speedText != null) View.VISIBLE else View.GONE
         if (speedText != null) speed.setText(speedText, animate = speed.text.isNotEmpty())
-        val needPermission = reading == null && config.homeGps && !gps.hasPermission()
+        val rpm = car?.rpm
+        rpmBar.visibility = if (rpm != null) View.VISIBLE else View.GONE
+        rpm?.let { rpmBar.set(it) }
+        val needPermission = canSpeed == null && reading == null && config.homeGps && !gps.hasPermission()
         val detail = when {
+            canSpeed != null -> listOfNotNull(rpm?.let { "转速 $it" }, reading?.detail?.ifEmpty { null })
+                .joinToString("  ·  ").ifEmpty { "车速来自车上的仪表数据" }
             reading != null -> reading.detail.ifEmpty { "GPS 已定位" }
             !config.homeGps -> "首页 GPS 已关闭"
             needPermission -> "点一下开启定位"
@@ -615,7 +647,7 @@ class MainActivity : Activity() {
                     setPadding(0, dp(4), 0, 0)
                 }
                 texts.addView(subView)
-                if (tile.slot == Slot.CAR) carViews = titleView to subView
+                if (tile.slot == Slot.CAR) { carViews = titleView to subView; showCarCard() }
             }
             card.addView(texts, FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM or Gravity.START).apply {
                 setMargins(pad, 0, pad, pad)
@@ -768,6 +800,8 @@ class MainActivity : Activity() {
         private const val REQ_OEM = 2
         /** The stock "液晶仪表" (car info) app, opened by the car card. */
         private const val CAR_INFO_APP = "com.wwc2.canbusapk"
+        private const val CAR_FRESH_MS = 5000L
+        private const val WARN_COLOR = 0xFFFFB340.toInt()
         private const val REQ_ADD = 3
         private const val REQ_REPLACE_BASE = 100
     }

@@ -135,19 +135,31 @@ class ReconTest {
         assertTrue(!ReconReport.isReady(app))
     }
 
-    /** The car card: fuel, open doors / lids, rpm; 65535 means "not reported". */
+    /** The car card: fuel in litres, warnings (red: open doors / lids, moving with the handbrake on or belt off; amber: low fuel). */
     @Test
     fun carDataTexts() {
-        val b = android.os.Bundle().apply {
-            putInt("RESIDUAL_OIL", 57); putInt("ENGINE_SPEED", 0); putInt("CRUISING_RANGE", 65535)
+        // Values from the owner's report while driving.
+        val car = android.os.Bundle().apply {
+            putInt("RESIDUAL_OIL", 57); putInt("ENGINE_SPEED", 1100); putInt("AVERAGE_SPEED", 18); putInt("CRUISING_RANGE", 65535)
+            putInt("DRIVER_SEAT_BELT", 1); putInt("HANDBRAKE_STATE", 0)
             putBoolean("LEFT_FRONT_DOOR", false); putBoolean("TRUNK_DOOR", false); putBoolean("CAR_HOOD", false)
         }
-        assertEquals("油量 57" to "车门都关好了", CarData.texts(CarData.parse(b)))
-        b.putBoolean("TRUNK_DOOR", true); b.putBoolean("LEFT_FRONT_DOOR", true); b.putInt("ENGINE_SPEED", 820)
-        assertEquals("油量 57" to "左前门、后备箱开着", CarData.texts(CarData.parse(b)))
-        b.putBoolean("TRUNK_DOOR", false); b.putBoolean("LEFT_FRONT_DOOR", false)
-        assertEquals("油量 57" to "转速 820", CarData.texts(CarData.parse(b)))
-        assertEquals("车况" to "读取中", CarData.texts(null))
+        val air = android.os.Bundle().apply { putBoolean("MODE_AUTO", true); putInt("LEFT_WIND_LEVEL", 6) }
+        val s = CarData.parse(car, air)
+        assertEquals(18, s.speed); assertEquals(1100, s.rpm); assertTrue(s.moving)
+        assertEquals(Triple("油量 57 L", "车门都关好 · 空调自动", CarData.Tone.NORMAL), CarData.texts(s))
+        car.putInt("DRIVER_SEAT_BELT", 0)
+        assertEquals(Triple("油量 57 L", "安全带没系", CarData.Tone.DANGER), CarData.texts(CarData.parse(car, air)))
+        car.putInt("HANDBRAKE_STATE", 1)
+        assertEquals("手刹没放", CarData.texts(CarData.parse(car, air)).second)
+        car.putBoolean("TRUNK_DOOR", true)
+        assertEquals("后备箱开着", CarData.texts(CarData.parse(car, air)).second)
+        // Parked: no belt / handbrake warnings; low fuel turns amber.
+        car.putBoolean("TRUNK_DOOR", false); car.putInt("AVERAGE_SPEED", 0); car.putInt("RESIDUAL_OIL", 8)
+        assertEquals(Triple("油量 8 L", "油不多了", CarData.Tone.WARN), CarData.texts(CarData.parse(car, air)))
+        car.putInt("RESIDUAL_OIL", 40)
+        assertEquals("车门都关好", CarData.texts(CarData.parse(car, null)).second)
+        assertEquals(Triple("车况", "读取中", CarData.Tone.NORMAL), CarData.texts(null))
     }
 
     @Test

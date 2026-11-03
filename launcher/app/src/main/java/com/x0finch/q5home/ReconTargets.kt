@@ -80,7 +80,6 @@ data class ReconTargets(
                   "pattern": "PictureInPicture|picture_in_picture|pip_|float_?window|floatview|small_?window|mini_?window|freeform|split_?screen|TYPE_APPLICATION_OVERLAY|SYSTEM_ALERT_WINDOW|auto_?(enter|open|start)"
                 }
               ],
-              "strings": "original|car_info|speed|rpm|engine|fuel|mileage|temperature|PictureInPicture|float|small_?window|mini_?window|freeform|split|overlay|auto_?(enter|open|start)",
               "providers": [
                 "content://com.wwc2.canmcusdk.CanbusProvider/original_screen",
                 "content://com.wwc2.canmcusdk.CanbusProvider/car_info",
@@ -208,7 +207,7 @@ class ReconKnown(
          */
         val DEFAULT_IGNORE = listOf(
             ReconTargets.CodeGroup("手机信号 / 网络 / SIM / Wi-Fi 开关",
-                Regex("SIG_STR|SERVICE_STATE|ANY_DATA_STATE|SUBINFO|DEFAULT_DATA_SUBSCRIPTION|SIM_STATE_CHANGED|SUBSCRIPTION_PHONE_STATE|RADIO_CAPABILITY|CLEAR_DNS_CACHE|global/wifi_on")),
+                Regex("SIG_STR|SERVICE_STATE|ANY_DATA_STATE|SUBINFO|DEFAULT_DATA_SUBSCRIPTION|SIM_STATE_CHANGED|SUBSCRIPTION_PHONE_STATE|RADIO_CAPABILITY|CLEAR_DNS_CACHE|global/wifi_on|RSSI_CHANGED|SCAN_RESULTS|LOCATED_PLMN_CHANGED|global/wifi_saved_state|global/auto_time")),
             ReconTargets.CodeGroup("每分钟的时钟广播", Regex("TIME_TICK|TIME_SET|TIMEZONE_CHANGED")),
             ReconTargets.CodeGroup("电池状态", Regex("BATTERY_CHANGED")),
             ReconTargets.CodeGroup("USB / HDMI 状态", Regex("USB_STATE|HDMI_PLUGGED")),

@@ -59,11 +59,12 @@ class Config(private val context: Context) {
         val error = importFile()
         // When not set manually (or left blank), re-detect every time so a later-installed ZLINK / DiPlay is found too.
         carplay = prefs.getString(KEY_CARPLAY, null)?.ifBlank { null } ?: Targets.findCarPlay(context)
-        // Once: the old auto-detection could store an app whose name merely contains 原车 / oem; the OEM tile now opens the stock
-        // home "主页" (the owner's choice). Later manual choices are kept.
-        if (!prefs.getBoolean(KEY_OEM_HOME_FIX, false)) {
-            val home = Targets.stockHome(context)
-            prefs.edit().apply { if (home != null) putString(KEY_OEM, home) }.putBoolean(KEY_OEM_HOME_FIX, true).apply()
+        // Once: the OEM tile switches to the original screen directly (the same broadcast as the stock "原车媒体" button; the owner
+        // approved it). An entry stored before is replaced once; later manual choices (long-press) are kept.
+        if (!prefs.getBoolean(KEY_OEM_SWITCH_V2, false)) {
+            val oem = if (Targets.hasOemSwitch(context)) Targets.OEM_SWITCH else Targets.stockHome(context)
+            prefs.edit().apply { if (oem != null) putString(KEY_OEM, oem) }
+                .putBoolean(KEY_OEM_HOME_FIX, true).putBoolean(KEY_OEM_SWITCH_V2, true).apply()
         }
         oem = prefs.getString(KEY_OEM, null)?.ifBlank { null } ?: Targets.findOem(context)
         dock = prefs.getString(KEY_DOCK, null)?.let(::parseDock) ?: defaultDock()
@@ -193,6 +194,7 @@ class Config(private val context: Context) {
         private const val KEY_CARPLAY = "carplay"
         private const val KEY_OEM = "oem"
         private const val KEY_OEM_HOME_FIX = "oem_home_fix_v1"
+        private const val KEY_OEM_SWITCH_V2 = "oem_switch_v2"
         private const val KEY_DOCK = "dock_v2"
         private const val KEY_AUTO_CARPLAY = "auto_carplay"
         private const val KEY_WALLPAPER = "wallpaper"

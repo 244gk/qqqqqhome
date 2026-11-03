@@ -14,11 +14,12 @@ import kotlin.concurrent.thread
  * (the owner just sends the copied text). Read-only: nothing is uploaded anywhere and no token is ever involved. Runs only while the "车机摸底" (recon) settings page is open and closes itself after [TIMEOUT_MS];
  * the path contains a random string so other devices on the same network can't guess it.
  *
- * [report] returns the report Markdown (null while it is still being generated). [onCopied] runs when the owner copies or
- * downloads it: the next report's event log then starts from that report.
+ * [report] returns the report Markdown (null while it is still being generated); while [refreshing] is true the page reloads
+ * itself every few seconds. [onCopied] runs when the owner copies or downloads it: the next report's event log then starts there.
  */
 class LocalShare(
     private val report: () -> String?,
+    private val refreshing: () -> Boolean = { false },
     private val onCopied: () -> Unit = {},
     port: Int = DEFAULT_PORT,
 ) {
@@ -81,7 +82,7 @@ class LocalShare(
     /** The page: the one report, to copy or download (sending the copied text is enough); refreshes itself while generating. */
     private fun page(): String {
         val md = report()
-        val refresh = if (md == null) "<meta http-equiv=\"refresh\" content=\"5\">" else ""
+        val refresh = if (md == null || refreshing()) "<meta http-equiv=\"refresh\" content=\"5\">" else ""
         val body = if (md == null) "正在生成报告（要读厂商应用的代码，可能一两分钟），本页会自动刷新…" else """
               <button onclick="var t=document.getElementById('r');t.select();document.execCommand('copy');fetch('copied');this.textContent='已复制'">复制全部</button>
               <a class="btn sec" href="report.md" download="report.md" onclick="fetch('copied')">下载 report.md</a>

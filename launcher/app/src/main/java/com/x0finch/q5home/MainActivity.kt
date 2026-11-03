@@ -41,7 +41,7 @@ import java.util.Locale
 
 class MainActivity : Activity() {
 
-    private enum class Slot { CARPLAY, OEM, DOCK, ADD, APPS }
+    private enum class Slot { CARPLAY, OEM, CAR, DOCK, ADD, APPS }
 
     private class Tile(
         val slot: Slot,
@@ -55,6 +55,16 @@ class MainActivity : Activity() {
 
 
     private lateinit var config: Config
+    /** Latest vehicle data for the car card, and its text views (updated in place, without rebuilding the tiles). */
+    private var carStatus: CarData.Status? = null
+    private var carViews: Pair<TextView, TextView>? = null
+    private val carData by lazy {
+        CarData(this) { status ->
+            carStatus = status
+            val (title, sub) = CarData.texts(status)
+            carViews?.let { (t, s) -> t.text = title; s.text = sub }
+        }
+    }
     private lateinit var root: View
     private lateinit var wallpaperView: ImageView
     private lateinit var scrim: View
@@ -224,6 +234,7 @@ class MainActivity : Activity() {
         updateBadge()
         rebuild()
         if (config.homeGps) gps.start() else gps.stop()
+        carData.start()
         handler.removeCallbacks(tripTicker)
         handler.post(tripTicker)
         EventRecorder.note(this, "首页", "q5home 首页显示")
@@ -234,6 +245,7 @@ class MainActivity : Activity() {
         if (!started) return
         EventRecorder.note(this, "首页", "q5home 首页离开")
         gps.stop()
+        carData.stop()
         handler.removeCallbacks(tripTicker)
     }
 
@@ -494,10 +506,16 @@ class MainActivity : Activity() {
                 !Targets.isAvailable(this, config.oem) -> getString(R.string.not_set)
                 // The WWC2 OEM home only goes as far as the "安卓盒子" (Android box) launcher; hint at the next step.
                 Targets.packageOf(config.oem) == Targets.WWC2_HOME -> getString(R.string.oem_sub_wwc2)
+                config.oem == Targets.OEM_SWITCH -> getString(R.string.oem_sub_switch)
                 else -> getString(R.string.oem_sub)
             },
             wide = false,
         )
+        // Car card (fuel, open doors, rpm) on the WWC2 platform; tapping it opens the stock "液晶仪表" (car info) app.
+        if (Targets.hasOemSwitch(this)) {
+            val (title, sub) = CarData.texts(carStatus)
+            list += Tile(Slot.CAR, 0, CAR_INFO_APP, null, title, sub, wide = false)
+        }
         config.dock.forEachIndexed { i, item ->
             val icon = Icons.byKey(item.icon)
             val label = Targets.label(this, item.target)
@@ -522,6 +540,7 @@ class MainActivity : Activity() {
         updateCarplay()
         if (tileHeight == 0) return
         tiles.removeAllViews()
+        carViews = null
         val gap = dp(16)
         val list = buildTiles()
         // App tiles are square (width = height, which follows the screen); more tiles scroll horizontally.
@@ -536,10 +555,11 @@ class MainActivity : Activity() {
 
     /** Tile icon: the unified icon (a white glyph, no colored square) first, otherwise the app's own icon. */
     private fun iconFor(tile: Tile): Drawable? =
-        tile.icon?.let { Icons.glyph(this, it, Ui.TEXT) } ?: Targets.icon(this, tile.spec)
+        if (tile.slot == Slot.CAR) getDrawable(R.drawable.glyph_fuel)?.mutate()?.apply { setTint(Ui.TEXT) }
+        else tile.icon?.let { Icons.glyph(this, it, Ui.TEXT) } ?: Targets.icon(this, tile.spec)
 
     private fun makeTileView(tile: Tile): View {
-        val fixed = tile.slot == Slot.APPS
+        val fixed = tile.slot == Slot.APPS || tile.slot == Slot.CAR
         val available = tile.slot == Slot.ADD || fixed || Targets.isAvailable(this, tile.spec)
         val icon = if (tile.slot == Slot.ADD) null else iconFor(tile)
 
@@ -588,11 +608,14 @@ class MainActivity : Activity() {
                 })
             }
             val texts = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-            texts.addView(Ui.text(this, tile.title, 17f, if (available) Ui.TEXT else Ui.TEXT_DIM, Ui.Font.MEDIUM))
+            val titleView = Ui.text(this, tile.title, 17f, if (available) Ui.TEXT else Ui.TEXT_DIM, Ui.Font.MEDIUM)
+            texts.addView(titleView)
             if (tile.sub.isNotEmpty()) {
-                texts.addView(Ui.text(this, tile.sub, 12f, if (available) Ui.TEXT_DIM else Ui.TEXT_FAINT).apply {
+                val subView = Ui.text(this, tile.sub, 12f, if (available) Ui.TEXT_DIM else Ui.TEXT_FAINT).apply {
                     setPadding(0, dp(4), 0, 0)
-                })
+                }
+                texts.addView(subView)
+                if (tile.slot == Slot.CAR) carViews = titleView to subView
             }
             card.addView(texts, FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM or Gravity.START).apply {
                 setMargins(pad, 0, pad, pad)
@@ -654,6 +677,7 @@ class MainActivity : Activity() {
 
     private fun onTileClick(tile: Tile, available: Boolean) {
         when {
+            tile.slot == Slot.CAR -> if (!Targets.launch(this, tile.spec)) toast("没有液晶仪表应用")
             tile.slot == Slot.ADD -> pick(REQ_ADD)
             tile.slot == Slot.APPS -> startActivity(Intent(this, LibraryActivity::class.java))
             !available -> pick(requestCodeFor(tile))
@@ -663,6 +687,7 @@ class MainActivity : Activity() {
 
     private fun onTileLongClick(tile: Tile, view: View) {
         if (tile.slot == Slot.ADD) { pick(REQ_ADD); return }
+        if (tile.slot == Slot.CAR) { onTileClick(tile, true); return }
         if (tile.slot == Slot.APPS) { onTileClick(tile, true); return }
         val items = mutableListOf(MenuItem("更换应用", R.drawable.ui_swap) { pick(requestCodeFor(tile)) })
         if (tile.slot == Slot.DOCK) {
@@ -693,7 +718,7 @@ class MainActivity : Activity() {
         Slot.CARPLAY -> REQ_CARPLAY
         Slot.OEM -> REQ_OEM
         Slot.DOCK -> REQ_REPLACE_BASE + tile.index
-        Slot.ADD, Slot.APPS -> REQ_ADD
+        Slot.ADD, Slot.APPS, Slot.CAR -> REQ_ADD
     }
 
     private fun pick(requestCode: Int) {
@@ -741,6 +766,8 @@ class MainActivity : Activity() {
 
         private const val REQ_CARPLAY = 1
         private const val REQ_OEM = 2
+        /** The stock "液晶仪表" (car info) app, opened by the car card. */
+        private const val CAR_INFO_APP = "com.wwc2.canbusapk"
         private const val REQ_ADD = 3
         private const val REQ_REPLACE_BASE = 100
     }

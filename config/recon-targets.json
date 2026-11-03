@@ -26,7 +26,6 @@
       "pattern": "PictureInPicture|picture_in_picture|pip_|float_?window|floatview|small_?window|mini_?window|freeform|split_?screen|TYPE_APPLICATION_OVERLAY|SYSTEM_ALERT_WINDOW|auto_?(enter|open|start)"
     }
   ],
-  "strings": "original|car_info|speed|rpm|engine|fuel|mileage|temperature|PictureInPicture|float|small_?window|mini_?window|freeform|split|overlay|auto_?(enter|open|start)",
   "providers": [
     "content://com.wwc2.canmcusdk.CanbusProvider/original_screen",
     "content://com.wwc2.canmcusdk.CanbusProvider/car_info",

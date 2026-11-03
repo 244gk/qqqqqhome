@@ -143,11 +143,24 @@ object Targets {
     const val WWC2_HOME = "com.wwc2.launcher"
 
     /**
-     * Auto-detects the OEM entry: the WWC2 stock home "主页" first (the owner's choice: its "原车媒体" switches to the OEM screen;
+     * What the stock launcher's "原车媒体" (OEM media) button sends (FragmentCar*.sendBroadCastAudiMedia: a plain broadcast, no
+     * extras). com.wwc2.canmcusdk receives it and tells the MCU to switch the screen's video input to the original MMI; touching
+     * the screen switches back. Sending it is exactly what that button does.
+     */
+    const val OEM_SWITCH = "broadcast:wwc2.com.wangyong.car"
+    const val CANMCU_SDK = "com.wwc2.canmcusdk"
+
+    /** The WWC2 platform that understands [OEM_SWITCH] is installed. */
+    fun hasOemSwitch(context: Context): Boolean =
+        runCatching { context.packageManager.getPackageInfo(CANMCU_SDK, 0) }.isSuccess
+
+    /**
+     * Auto-detects the OEM entry: on the WWC2 platform the direct switch [OEM_SWITCH] (the owner approved it), else the stock home "主页" (the owner's choice: its "原车媒体" switches to the OEM screen;
      * other apps whose names contain 原车 / oem are not the switch), then by label keywords. If not found, the user picks one by
      * long-press or via config.json.
      */
-    fun findOem(context: Context): String? = stockHome(context) ?: findByKeywords(context, OEM_KEYWORDS)
+    fun findOem(context: Context): String? =
+        (if (hasOemSwitch(context)) OEM_SWITCH else null) ?: stockHome(context) ?: findByKeywords(context, OEM_KEYWORDS)
 
     /** Launch spec of the WWC2 stock home "主页", or null when it isn't installed. */
     fun stockHome(context: Context): String? =

@@ -44,6 +44,21 @@ class TargetsTest {
         assertEquals("com.wwc2.launcher/com.wwc2.launcher.entry.MainActivity", Targets.findOem(context))
     }
 
+    /** On the WWC2 platform the OEM tile sends the stock "原车媒体" broadcast directly (approved by the owner). */
+    @Test
+    fun oemSwitchesDirectlyOnWwc2() {
+        FakeApps.install(context, "com.wwc2.launcher/com.wwc2.launcher.entry.MainActivity" to "主页")
+        org.robolectric.Shadows.shadowOf(context.packageManager).installPackage(
+            android.content.pm.PackageInfo().apply { packageName = Targets.CANMCU_SDK })
+        assertEquals("broadcast:wwc2.com.wangyong.car", Targets.findOem(context))
+        val config = Config(context)
+        config.reload()
+        assertEquals(Targets.OEM_SWITCH, config.oem)
+        assertTrue(Targets.launch(context, config.oem))
+        assertEquals("wwc2.com.wangyong.car",
+            org.robolectric.Shadows.shadowOf(context as android.app.Application).broadcastIntents.last().action)
+    }
+
     /** Once, an OEM entry stored by the old detection is replaced by "主页"; a choice made afterwards is kept. */
     @Test
     fun storedOemMovesToStockHomeOnce() {

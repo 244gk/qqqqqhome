@@ -65,9 +65,10 @@ Add package names here as they are identified:
 - Reversing camera / 360 / camera related (driving safety): `com.baony.avm360`
 - CAN protocol box, MCU communication, vehicle info services: `com.wwc2.canbusapk`, `com.wwc2.canmcusdk`, `com.wwc2.carmanager`,
   `com.wwc2.main` (core, includes the ACC power-on broadcast), `com.wwc2.poweroff`, `com.wwc2.mcuupdate`, `com.wwc2.canmcuupdate`
-- Original car MMI screen switching (left screen, the original car ("原车") entry): direct method not yet confirmed. Owner tested: tapping the stock Home ("主页") `com.wwc2.launcher` opens the Android box launcher,
-  and Original car media ("原车媒体") inside it switches to the original car; clues: `content://com.wwc2.canmcusdk.CanbusProvider/original_screen`, `com.wwc2.APK_TO_MAIN`,
-  main's `AvinLogic` / `VideoSource`. The related packages `com.wwc2.canmcusdk`, `com.wwc2.main`, `com.wwc2.mainui`, `com.wwc2.black` are all off limits
+- Original car MMI screen switching (left screen, the original car ("原车") entry): the stock Home's "原车媒体" button sends a plain
+  broadcast `wwc2.com.wangyong.car` (no extras; `FragmentCar*.sendBroadCastAudiMedia`); `com.wwc2.canmcusdk` (`McuManager$1.onReceive`)
+  then tells the MCU (command 0x82) to switch the screen's video input to the original MMI. Android does not handle the video at all;
+  touching the screen switches back (vendor touch handling). q5home's OEM tile sends the same broadcast (owner approved). The related packages `com.wwc2.canmcusdk`, `com.wwc2.main`, `com.wwc2.mainui`, `com.wwc2.black` are all off limits
 - Right sidebar (central locking, seatbelt icons) and SystemUI: `com.android.systemui`, `com.wwc2.mainui`
 - Audio channel switching, Bluetooth, radio, steering wheel buttons, MMI knob mapping: `com.wwc2.bluetooth`, `com.goodocom.gocsdk` (Bluetooth stack)
 - ZLINK (and DiPlay, which was tried): `com.zjinnova.zlink`
@@ -90,10 +91,11 @@ Add package names here as they are identified:
 - `launcher/`: launcher APK, Kotlin + classic Views (no Compose, the head unit CPU is weak), no third-party dependencies.
   - `build-and-install.sh`: build and install; `--set-home` confirms, records and supports rollback before switching the default launcher.
   - Configuration: SharedPreferences + a `config.json` that can be pushed via adb (see `Config.kt`, `Targets.kt`).
-  - The OEM ("原车") tile opens the stock home "主页" (`com.wwc2.launcher`) by default (the owner's choice: its "原车媒体" switches
-    to the OEM screen); `Targets.findOem` tries it before any app whose name contains 原车 / oem, and `Config` moved an entry stored
-    by the old detection to it once (`oem_home_fix_v1`). Once recon finds the original car switching component, put it in the `oem`
-    field of config.json; do not hardcode it.
+  - The OEM ("原车") tile sends `Targets.OEM_SWITCH` (`broadcast:wwc2.com.wangyong.car`, the stock "原车媒体" broadcast) when
+    `com.wwc2.canmcusdk` is installed, else opens the stock home "主页"; `Config` set it once (`oem_switch_v2`), and a long-press choice
+    is kept. The car card (`CarData.kt`, slot CAR, right after the OEM tile) shows fuel, open doors / lids and rpm from the read-only
+    `CanbusProvider` `call("car_info")` getter, refreshed at most once a second while the home screen is shown; a tap opens the
+    stock "液晶仪表" (`com.wwc2.canbusapk`).
   - Home screen icons are in `Icons.kt` (Material Symbols vectors); tile = icon key + target; switching apps only changes the target.
   - Wallpapers are in `res/drawable-nodpi/wall_*.webp`, sources recorded in `CREDITS.md`; update it when adding wallpapers.
   - Online wallpapers: `OnlineWallpapers.kt` + `WallpaperJob.kt` (Wi-Fi only, once a day); storage limit 8 images / 6 MB,
@@ -148,16 +150,17 @@ Add package names here as they are identified:
     so gaps show. Events known not to matter ("ignoreEvents" in `config/recon-known.json`, built-in copy `ReconKnown.DEFAULT_IGNORE`,
     tests check they match; the copy downloaded with a report replaces it) are never registered or written. It must never send, write or switch anything on the head unit.
     Usage access ("使用情况访问权限"), if the owner turns it on in system settings, adds which app / page came to the front.
-    The report is prepared in the background (`ReconReport`): about 2 minutes after q5home starts or the ignition comes on it
-    downloads both config files (cached on the head unit for when Wi-Fi is down) and runs the slow code analysis, kept in q5home's
-    files and redone only when a config, a vendor app or q5home changes; scanning the QR code then only adds the cheap parts
-    (changes, vehicle data via the read-only `call("xxx_info")` getters, event log, properties, settings, provider reads).
+    The whole report is prepared in the background (`ReconReport`): shortly after q5home starts (15 s when nothing is prepared yet,
+    else 2 minutes) or the ignition comes on, then every 15 minutes, it downloads both config files (cached on the head unit for when
+    Wi-Fi is down), runs the slow code analysis (redone only when a config, a vendor app or q5home changes) and reads changes,
+    vehicle data (read-only `call("xxx_info")` getters), properties, settings and provider reads into one file. **Scanning the QR code
+    computes nothing** (the owner's rule): it serves that file plus the event log at once.
     Code analysis covers only the vendor's own classes ("vendorClasses"), never bundled libraries.
     **There is exactly one report** (the owner's rule: no focused / full split) and it shows **only what is new**:
     `config/recon-known.json` lists what earlier reports already showed (system build, vendor app versions, disassembled methods,
     provider query results, code strings, known event noise, and "lines": hashes of every report line already seen); it is downloaded
     when the report is prepared and everything in it is left out. **After reading each report, add what it taught us to that file (no release needed).** The report has: changes
-    (system, vendor apps added / removed / updated with their components and new strings), GPS, the event log since the owner last
+    (system, vendor apps added / removed / updated with their components and new strings), the event log since the owner last
     copied a report (the web page tells the app on copy), and the read-only analysis set by `config/recon-targets.json`
     (same copy built into `ReconTargets.kt`, tests check they match; change the analysis focus there, no release needed).
     These files may only decide what to read; never add the ability to write to or switch anything on the head unit.

@@ -126,12 +126,28 @@ class ReconTest {
         EventLog.clear(app)
     }
 
-    /** Before the background preparation has run, the report still shows the cheap parts and says the code analysis is coming. */
+    /** Serving never computes anything slow: before the background preparation it says what is being prepared. */
     @Test
-    fun reportBeforeBackgroundPreparation() {
-        val md = ReconReport.build(app, null).markdown
-        assertTrue(md.contains("## 和上次相比的变化"))
-        assertTrue(md.contains("还在后台准备"))
+    fun reportIsServedFromWhatWasPrepared() {
+        val md = ReconReport.serve(app, null)
+        assertTrue(md.contains("## 后台事件记录"))
+        assertTrue(md.contains("其余部分还在后台准备"))
+        assertTrue(!ReconReport.isReady(app))
+    }
+
+    /** The car card: fuel, open doors / lids, rpm; 65535 means "not reported". */
+    @Test
+    fun carDataTexts() {
+        val b = android.os.Bundle().apply {
+            putInt("RESIDUAL_OIL", 57); putInt("ENGINE_SPEED", 0); putInt("CRUISING_RANGE", 65535)
+            putBoolean("LEFT_FRONT_DOOR", false); putBoolean("TRUNK_DOOR", false); putBoolean("CAR_HOOD", false)
+        }
+        assertEquals("油量 57" to "车门都关好了", CarData.texts(CarData.parse(b)))
+        b.putBoolean("TRUNK_DOOR", true); b.putBoolean("LEFT_FRONT_DOOR", true); b.putInt("ENGINE_SPEED", 820)
+        assertEquals("油量 57" to "左前门、后备箱开着", CarData.texts(CarData.parse(b)))
+        b.putBoolean("TRUNK_DOOR", false); b.putBoolean("LEFT_FRONT_DOOR", false)
+        assertEquals("油量 57" to "转速 820", CarData.texts(CarData.parse(b)))
+        assertEquals("车况" to "读取中", CarData.texts(null))
     }
 
     @Test

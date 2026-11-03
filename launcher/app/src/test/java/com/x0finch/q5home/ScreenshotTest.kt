@@ -51,6 +51,40 @@ class ScreenshotTest {
     @Test fun home1024x600() = home("w1024dp-h600dp-land-mdpi", "home-1024x600", "road")
     @Test fun homeBlack() = home("w1280dp-h480dp-land-mdpi", "home-black", Wallpapers.NONE)
 
+    /** Fake CanbusProvider: the car_info getter returns what the head unit reported (57 fuel, trunk open). */
+    class CarInfoProvider : android.content.ContentProvider() {
+        override fun onCreate() = true
+        override fun call(method: String, arg: String?, extras: android.os.Bundle?): android.os.Bundle? =
+            if (method == "car_info") android.os.Bundle().apply {
+                putInt("RESIDUAL_OIL", 57); putInt("ENGINE_SPEED", 0); putBoolean("TRUNK_DOOR", true)
+            } else null
+        override fun query(u: android.net.Uri, p: Array<out String>?, s: String?, a: Array<out String>?, o: String?) = null
+        override fun getType(uri: android.net.Uri): String? = null
+        override fun insert(uri: android.net.Uri, v: android.content.ContentValues?): android.net.Uri? = null
+        override fun delete(uri: android.net.Uri, s: String?, a: Array<out String>?) = 0
+        override fun update(uri: android.net.Uri, v: android.content.ContentValues?, s: String?, a: Array<out String>?) = 0
+    }
+
+    /** On the WWC2 platform: the OEM tile switches directly, and the car card shows fuel and open doors / lids. */
+    @Test
+    fun homeOnWwc2() {
+        RuntimeEnvironment.setQualifiers("w1280dp-h480dp-land-mdpi")
+        FakeApps.installCar(context)
+        shadowOf(context.packageManager).installPackage(android.content.pm.PackageInfo().apply { packageName = Targets.CANMCU_SDK })
+        Robolectric.setupContentProvider(CarInfoProvider::class.java, "com.wwc2.canmcusdk.CanbusProvider")
+        Config(context).setWallpaper("stars")
+        val activity = Robolectric.buildActivity(MainActivity::class.java).setup().get()
+        repeat(40) {
+            shadowOf(android.os.Looper.getMainLooper()).idleFor(java.time.Duration.ofMillis(100))
+            if (findText(activity.window.decorView, "油量 57") != null) return@repeat
+            Thread.sleep(50)
+        }
+        org.junit.Assert.assertNotNull(findText(activity.window.decorView, "油量 57"))
+        org.junit.Assert.assertNotNull(findText(activity.window.decorView, "后备箱开着"))
+        org.junit.Assert.assertNotNull(findText(activity.window.decorView, "切到原车画面，点屏幕返回"))
+        shoot(activity, "home-wwc2")
+    }
+
     /** A favorite app using its own icon: the icon is the same size and position as the white unified glyphs. */
     @Test
     fun homeCustomAppIcon() {

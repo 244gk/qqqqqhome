@@ -6,6 +6,7 @@
     <string name="oem">原车</string>
     <string name="oem_sub">MMI 原车画面</string>
     <string name="oem_sub_wwc2">安卓盒子主页 → 原车媒体</string>
+    <string name="oem_sub_switch">切到原车画面，点屏幕返回</string>
     <string name="add">添加</string>
     <string name="not_set">长按选择应用</string>
     <string name="all_apps">全部应用</string>

@@ -39,9 +39,9 @@ object Recon {
     }
 
     /**
-     * The one recon report: only what is NEW compared with [known] (earlier reports). [staticPart] is the slow code analysis
-     * ([staticSections], prepared in the background by [ReconReport]); everything else is read now (cheap):
-     * changes, vehicle data, the event log since [eventsSinceMs], properties, settings and provider reads.
+     * The one recon report in one go (used by tests; on the head unit [ReconReport] prepares the parts in the background):
+     * only what is NEW compared with [known] — event log since [eventsSinceMs], changes, vehicle data, properties, settings,
+     * provider reads and the code analysis ([staticPart] if already prepared).
      */
     fun report(context: Context, targets: ReconTargets, known: ReconKnown, eventsSinceMs: Long?,
                nowMs: Long = System.currentTimeMillis(), staticPart: String? = null): Report {
@@ -53,7 +53,8 @@ object Recon {
         md.appendLine(if (known.source != null) "只列新内容：之前报告里已经有的（${known.source}）都省略了。"
             else "**已知列表没下载到，车机上也没有存过**，下面是全部内容，没有省略已知的。")
         md.appendLine()
-        md.append(liveSections(context, targets, known, eventsSinceMs))
+        md.append(eventsSection(context, known, eventsSinceMs))
+        md.append(snapshotSections(context, targets, known))
         md.append(staticPart ?: staticSections(context, targets, known))
         return Report(md.toString(), "车机摸底 ${Build.MODEL} $now")
     }
@@ -71,8 +72,36 @@ object Recon {
         appendLine()
     }
 
-    /** The cheap parts, read every time the report is shown. */
-    fun liveSections(context: Context, targets: ReconTargets, known: ReconKnown, eventsSinceMs: Long?): String {
+    /** The event log since [eventsSinceMs] (read when the report is shown: it is only a local file). */
+    fun eventsSection(context: Context, known: ReconKnown, eventsSinceMs: Long?): String {
+        val md = StringBuilder()
+        val all = EventLog.lines(context, eventsSinceMs).sortedBy { EventLog.timeOf(it) ?: 0L }
+        val noise = known.ignoreEvents.associateWith { 0 }.toMutableMap()
+        val events = all.filter { line ->
+            val g = known.ignoreEvents.firstOrNull { it.pattern.containsMatchIn(line) }
+            if (g != null) noise[g] = noise.getValue(g) + 1
+            g == null
+        }
+        val since = eventsSinceMs?.let { SimpleDateFormat("MM-dd HH:mm:ss", Locale.US).format(Date(it)) }
+        md.appendLine("## 后台事件记录（${if (since != null) "上次复制报告 $since 之后" else "全部"}，${events.size} 条）")
+        md.appendLine("q5home 在后台只听不发，按时间排序。「启动」= q5home 进程重新启动，之前的空白是没在记录；「前台」= 切到前台的应用和页面。")
+        noise.filterValues { it > 0 }.takeIf { it.isNotEmpty() }?.let { n ->
+            md.appendLine("已知、省略：" + n.entries.joinToString("；") { "${it.key.name} ${it.value} 条" } + "。")
+        }
+        if (events.isEmpty()) md.appendLine("（没有新事件）")
+        else {
+            val shown = events.takeLast(EVENT_LIMIT)
+            if (events.size > shown.size) md.appendLine("太多了，只列最后 $EVENT_LIMIT 条。")
+            md.appendLine("```")
+            shown.forEach { md.appendLine(it) }
+            md.appendLine("```")
+        }
+        md.appendLine()
+        return md.toString()
+    }
+
+    /** Changes, vehicle data, properties, settings and provider reads: prepared in the background with the code analysis. */
+    fun snapshotSections(context: Context, targets: ReconTargets, known: ReconKnown): String {
         val pm = context.packageManager
         val md = StringBuilder()
 
@@ -107,30 +136,6 @@ object Recon {
             md.appendLine()
         }
 
-        // ---- Event log ----
-        val all = EventLog.lines(context, eventsSinceMs).sortedBy { EventLog.timeOf(it) ?: 0L }
-        val noise = known.ignoreEvents.associateWith { 0 }.toMutableMap()
-        val events = all.filter { line ->
-            val g = known.ignoreEvents.firstOrNull { it.pattern.containsMatchIn(line) }
-            if (g != null) noise[g] = noise.getValue(g) + 1
-            g == null
-        }
-        val since = eventsSinceMs?.let { SimpleDateFormat("MM-dd HH:mm:ss", Locale.US).format(Date(it)) }
-        md.appendLine("## 后台事件记录（${if (since != null) "上次复制报告 $since 之后" else "全部"}，${events.size} 条）")
-        md.appendLine("q5home 在后台只听不发，按时间排序。「启动」= q5home 进程重新启动，之前的空白是没在记录；「前台」= 切到前台的应用和页面。")
-        noise.filterValues { it > 0 }.takeIf { it.isNotEmpty() }?.let { n ->
-            md.appendLine("已知、省略：" + n.entries.joinToString("；") { "${it.key.name} ${it.value} 条" } + "。")
-        }
-        if (events.isEmpty()) md.appendLine("（没有新事件）")
-        else {
-            val shown = events.takeLast(EVENT_LIMIT)
-            if (events.size > shown.size) md.appendLine("太多了，只列最后 $EVENT_LIMIT 条。")
-            md.appendLine("```")
-            shown.forEach { md.appendLine(it) }
-            md.appendLine("```")
-        }
-        md.appendLine()
-
         // ---- Properties named in vendor code, settings, providers: only values not seen before ----
         val apks = targets.packages.mapNotNull { pkg ->
             runCatching { pm.getApplicationInfo(pkg, 0).sourceDir }.getOrNull()?.let { pkg to File(it) }
@@ -164,7 +169,7 @@ object Recon {
     }
 
     /** The slow part (reads and disassembles the vendor APKs): prepared in the background by [ReconReport]. */
-    fun staticSections(context: Context, targets: ReconTargets, known: ReconKnown): String {
+    fun staticSections(context: Context, targets: ReconTargets, known: ReconKnown, progress: (String) -> Unit = {}): String {
         val pm = context.packageManager
         val md = StringBuilder()
         val apks = targets.packages.mapNotNull { pkg ->
@@ -172,7 +177,8 @@ object Recon {
         }
         val vendorCode = { name: String -> targets.vendorClasses?.containsMatchIn(name) ?: true }
 
-        for (group in targets.code) {
+        for ((i, group) in targets.code.withIndex()) {
+            progress("分析厂商代码：${group.name}（${i + 1}/${targets.code.size}）")
             md.appendLine("## ${group.name}（只读反汇编）")
             md.appendLine("厂商代码里用到匹配 `${group.pattern.pattern}` 的字符串、调用或字段（或自己就叫这个名字）的方法：" +
                 "按顺序列出字符串（str）、整数（int）、调用（call）、读写字段（get / put）。")
@@ -199,6 +205,7 @@ object Recon {
         }
 
         for (site in targets.sites) {
+            progress("分析厂商代码：${site.name}")
             val lines = mutableListOf<String>()
             for ((pkg, apk) in apks) {
                 DexScan.sitesApk(apk, { site.call.containsMatchIn(it) }, SITE_LIMIT, owner = vendorCode).forEach { f ->
@@ -211,6 +218,7 @@ object Recon {
         }
 
         targets.constants?.let { pattern ->
+            progress("分析厂商代码：常量表")
             val lines = mutableListOf<String>()
             for ((pkg, apk) in apks) {
                 DexScan.constantsApk(apk, { name -> vendorCode(name) && pattern.containsMatchIn(name) }).forEach { t ->

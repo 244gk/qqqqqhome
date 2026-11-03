@@ -53,8 +53,6 @@ class SettingsActivity : Activity() {
     private var downloadProgress: Int? = null
     // Head-unit survey
     private var share: LocalShare? = null
-    /** The report shown on the phone's QR-code web page (null while it is being generated). */
-    @Volatile private var lastMarkdown: String? = null
     // GPS & 4G
     private val signal by lazy { SignalCheck(this) }
     private val signalViews = mutableMapOf<String, TextView>()
@@ -751,23 +749,15 @@ class SettingsActivity : Activity() {
 
     private fun startShare() {
         stopShare()
-        // The slow part was prepared in the background when the head unit started (ReconReport); only the cheap parts are read now.
-        // If it isn't ready yet (first start of this version), prepare it now; the web page refreshes itself until the report is there.
-        lastMarkdown = null
+        // The whole report was prepared in the background (ReconReport): serving it only reads that file and the event log,
+        // so the page shows at once. Copying / downloading moves the start of the next report's event log to now.
         val since = reconPrefs().getLong(KEY_EVENTS_COPIED, 0L).takeIf { it > 0 }
-        val generatedAt = System.currentTimeMillis()
-        Thread {
-            if (ReconReport.staticPart(this) == null) ReconReport.prepareNow(this)
-            val r = runCatching { ReconReport.build(this, since) }
-            lastMarkdown = r.getOrNull()?.markdown ?: "生成报告出错：${r.exceptionOrNull()}"
-            runOnUiThread { if (section == SECTION_RECON) render() }
-        }.start()
         share = runCatching {
-            // Copied / downloaded: the next report's event log continues from this report.
-            LocalShare(report = { lastMarkdown }, onCopied = {
-                if (lastMarkdown != null) reconPrefs().edit().putLong(KEY_EVENTS_COPIED, generatedAt).apply()
+            LocalShare(report = { ReconReport.serve(this, since) }, refreshing = { !ReconReport.isReady(this) }, onCopied = {
+                reconPrefs().edit().putLong(KEY_EVENTS_COPIED, System.currentTimeMillis()).apply()
             })
         }.onFailure { overlay.snackbar("开不了临时网页：${it.message}") }.getOrNull()
+        if (!ReconReport.isReady(this)) ReconReport.schedule(this, 0)
         // Close automatically when time is up (the web page side also rejects requests after the timeout).
         val started = share
         root.postDelayed({
@@ -784,12 +774,14 @@ class SettingsActivity : Activity() {
     private fun reconPrefs() = getSharedPreferences("recon", MODE_PRIVATE)
 
     /** Whether the report prepared in the background is ready. */
-    private fun reportStatus(): String = when {
-        ReconReport.state == ReconReport.State.WORKING -> "报告正在后台准备（车机启动后自动做），也可以先扫码，好了网页会自动显示"
-        ReconReport.readyAt > 0 ->
-            "报告已在后台准备好（${java.text.SimpleDateFormat("HH:mm", java.util.Locale.US).format(java.util.Date(ReconReport.readyAt))}），扫码直接看"
-        ReconReport.staticPart(this) != null -> "报告已准备好，扫码直接看"
-        else -> "车机启动约 2 分钟后自动在后台准备报告；现在扫码也行，会当场准备（要一两分钟）"
+    private fun reportStatus(): String {
+        val at = ReconReport.readyAt(this)
+        return when {
+            at > 0 -> "报告已在后台准备好（${java.text.SimpleDateFormat("HH:mm", java.util.Locale.US).format(java.util.Date(at))}），扫码直接看"
+            ReconReport.state == ReconReport.State.WORKING -> "报告正在后台准备：${ReconReport.progress}"
+            ReconReport.state == ReconReport.State.FAILED -> ReconReport.progress
+            else -> "车机启动后会自动在后台准备报告"
+        }
     }
 
     /** Storage usage bar. */

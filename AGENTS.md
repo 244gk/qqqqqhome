@@ -173,6 +173,10 @@ Add package names here as they are identified:
     one; never a made-up 0. The rpm is always named next to its bar. Car card: no A/C state (air_info has no compressor field,
     MODE_AUTO stays true with only the fan), only the fan level. "handbrake" in the vendor broadcasts / HANDBRAKE_STATE only
     flipped when leaving and returning to P in the owner's test (a guess, not confirmed); no gear, reverse or radar data arrives.
+    In the 2026-11-04 report it turned to 1 shortly before every ignition off (parking), still unconfirmed. Seen in the
+    vendor broadcasts: `CurSource` 15 = home, 19 = ZLINK, 24 = ignition off (`com.wwc2.black`), 27 = the stock 液晶仪表;
+    `key` 1 = HOME, 3 = BACK; ZLINK reports calls (`PHONE_CALL_ON` / `OFF`, then shows its page). The head unit does not reboot
+    on ignition off (its clock kept running across drives), so a TrueTime anchor from one boot carries over to later drives.
     Code analysis covers only the vendor's own classes ("vendorClasses"), never bundled libraries.
     **There is exactly one report** (the owner's rule: no focused / full split) and it shows **only what is new**:
     `config/recon-known.json` lists what earlier reports already showed (system build, vendor app versions, disassembled methods,

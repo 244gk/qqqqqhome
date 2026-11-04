@@ -1,6 +1,6 @@
 {
  "comment": "已经知道的车机信息（来自之前的报告）。车机生成报告时下载这个文件，这里有的就不再写进报告：methods 是分析过的方法名，lines 是报告里出现过的行（SHA-1 前 16 位），ignoreEvents 是确定没用、后台根本不记的事件。每次看完报告后更新这个文件，不用发版。",
- "from": "q5home 1.0.210 report (2026-11-02 09:35) + 1.0.212 report (2026-11-03 08:44) + 1.0.213 report (2026-11-03 10:25) + 1.0.214 report (2026-11-03 12:03)",
+ "from": "q5home 1.0.210 report (2026-11-02 09:35) + 1.0.212 report (2026-11-03 08:44) + 1.0.213 report (2026-11-03 10:25) + 1.0.214 report (2026-11-03 12:03) + 1.0.218 report (2026-11-04 09:27)",
  "ignoreEvents": [
   {
    "name": "手机信号 / 网络 / SIM / Wi-Fi 开关",
@@ -42,7 +42,7 @@
  "system": "006_20_1.0.63_230322",
  "versions": {
   "com.baony.avm360": "2.21.527",
-  "com.chartcross.gpstest": "1.6.0",
+  "com.chartcross.gpstest": "1.6.7",
   "com.fvsm.camera": "0223_v3.0.7",
   "com.goodocom.gocsdk": "1.0.5",
   "com.mediatek": "12",
@@ -77,7 +77,7 @@
   "com.wwc2.systempermission": "0.0.14",
   "com.wwc2.systemupdate_apk": "1.2",
   "com.wwc2.video": "8.4.53",
-  "com.x0finch.q5home": "1.0.210",
+  "com.x0finch.q5home": "1.0.218",
   "com.zjinnova.zlink": "3.9.68",
   "de.szalkowski.activitylauncher": "2.4.1",
   "net.easyconn": "6.3.2-82aa509-202007311416"
@@ -323,7 +323,8 @@
   "com.wwc2.mainui.volume.VolumeFloatView29$1.onTouch",
   "com.wwc2.mainui.volume.VolumeFloatView29$2.<init>",
   "com.wwc2.mainui.volume.VolumeFloatView29$2.onTimer",
-  "com.wwc2.mainui_interface.MainUIDefine$FloatType.getFloatViews"
+  "com.wwc2.mainui_interface.MainUIDefine$FloatType.getFloatViews",
+  "com.wwc2.mainui.backlight.BacklightView.<init>"
  ],
  "providers": [
   "content://com.wwc2.canmcusdk.CanbusProvider/",
@@ -1141,7 +1142,28 @@
   "widget_page35_3",
   "widget_page36_1",
   "widget_page36_2",
-  "widget_page36_3"
+  "widget_page36_3",
+  "content://com.google.android.gms.phenotype/",
+  "getOriginalExternalTransactionId",
+  "getOriginalJson",
+  "mOriginalJson",
+  "originalExternalTransactionId",
+  "setOriginalExternalTransactionId",
+  "android.google.analytics.action.DEEPLINK_ACTION",
+  "android.intent.action.BATTERY_CHANGED",
+  "android.intent.action.USER_UNLOCKED",
+  "android.settings.APPLICATION_DETAILS_SETTINGS",
+  "android.settings.LOCATION_SOURCE_SETTINGS",
+  "com.android.vending.INSTALL_REFERRER",
+  "com.android.vending.billing.ALTERNATIVE_BILLING",
+  "com.android.vending.billing.IN_APP_BILLING_RESULT_UPDATE_ACTION",
+  "com.android.vending.billing.InAppBillingService.BIND",
+  "com.android.vending.billing.LOCAL_BROADCAST_PURCHASES_UPDATED",
+  "com.android.vending.billing.PLAY_BILLING_ACTIVITY_CREATED_ACTION",
+  "com.android.vending.billing.PURCHASES_UPDATED",
+  "com.chartcross.gpstest.extra.FLOW_TRIGGER",
+  "com.chartcross.gpstest.extra.THEME",
+  "previous_page"
  ],
  "lines": [
   "00b741b6a2e104c9",
@@ -1708,6 +1730,9 @@
   "fe54b5551d200971",
   "fed0ba18dea37daa",
   "ff639e684a6632a2",
-  "ffefce41afba3eee"
+  "ffefce41afba3eee",
+  "8a6c9fa0261e5ecd",
+  "bd820f1cee325bbb",
+  "c4a526778fa72357"
  ]
 }

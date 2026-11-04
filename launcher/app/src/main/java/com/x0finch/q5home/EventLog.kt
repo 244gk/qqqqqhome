@@ -37,11 +37,11 @@ object EventLog {
         val f = file(context)
         if (pendingFile != null && pendingFile != f) flushLocked()
         pendingFile = f
-        if (lastFlush == 0L) lastFlush = System.currentTimeMillis()
+        if (lastFlush == 0L) lastFlush = android.os.SystemClock.elapsedRealtime()
         pending.append(format.get()!!.format(Date(nowMs))).append("  ").append(kind).append("  ")
             .append(text.replace('\n', ' ').take(MAX_LINE)).append('\n')
         pendingLines++
-        if (now || pendingLines >= FLUSH_LINES || System.currentTimeMillis() - lastFlush >= FLUSH_MS) flushLocked()
+        if (now || pendingLines >= FLUSH_LINES || android.os.SystemClock.elapsedRealtime() - lastFlush >= FLUSH_MS) flushLocked()
     }
 
     /** Writes what is collected so far (called on a timer by the recorder, and before reading). */
@@ -49,7 +49,7 @@ object EventLog {
     fun flush() = flushLocked()
 
     private fun flushLocked() {
-        lastFlush = System.currentTimeMillis()
+        lastFlush = android.os.SystemClock.elapsedRealtime()
         val f = pendingFile ?: return
         if (pendingLines == 0) return
         runCatching {
@@ -90,6 +90,13 @@ object EventLog {
 
     /** When a line was written; lines stamped while the clock was 1024 weeks behind are corrected ([TrueTime]). */
     fun timeOf(line: String): Long? = runCatching { format.get()!!.parse(line.take(23))?.time }.getOrNull()?.let(TrueTime::correct)
+
+    /** The line with its time stamp rewritten to the corrected time (lines written while the clock was 1024 weeks behind). */
+    fun corrected(line: String): String {
+        val time = timeOf(line) ?: return line
+        val stamp = format.get()!!.format(Date(time))
+        return if (line.startsWith(stamp)) line else stamp + line.substring(23)
+    }
 
     @Synchronized
     fun clear(context: Context) {

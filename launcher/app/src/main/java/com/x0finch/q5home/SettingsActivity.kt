@@ -676,7 +676,7 @@ class SettingsActivity : Activity() {
         header("车机摸底", "只读：后台只听不发，扫码拿一份只有新内容的报告")
         // Scanning the QR code and copying the report is the only way to share it (nothing is uploaded), so that card comes first.
         card(shareRow())
-        val sentAt = reconPrefs().getLong(KEY_EVENTS_COPIED, 0L).takeIf { it > 0 }
+        val sentAt = reconPrefs().getLong(KEY_EVENTS_COPIED, 0L).takeIf { it > 0 }?.let(TrueTime::correct)
         val events = EventLog.lines(this, sentAt, reconPrefs().getString(KEY_EVENTS_COPIED_LINE, null))
         val eventStatus = when {
             events.isEmpty() -> "后台一直在听（只听不发）。在车上操作一轮后扫码，事件记录就在报告里"
@@ -751,10 +751,10 @@ class SettingsActivity : Activity() {
         stopShare()
         // The whole report was prepared in the background (ReconReport): serving it only reads that file and the event log,
         // so the page shows at once. Copying / downloading moves the start of the next report's event log to now.
-        val since = reconPrefs().getLong(KEY_EVENTS_COPIED, 0L).takeIf { it > 0 }
+        val since = reconPrefs().getLong(KEY_EVENTS_COPIED, 0L).takeIf { it > 0 }?.let(TrueTime::correct)
         val sinceLine = reconPrefs().getString(KEY_EVENTS_COPIED_LINE, null)
         share = runCatching {
-            LocalShare(report = { ReconReport.serve(this, since, sinceLine) }, refreshing = { !ReconReport.isReady(this) }, onCopied = {
+            LocalShare(secret = shareSecret(), report = { ReconReport.serve(this, since, sinceLine) }, refreshing = { !ReconReport.isReady(this) }, onCopied = {
                 // Remember the last line too: the next report continues after it even if the clock jumps.
                 reconPrefs().edit().putLong(KEY_EVENTS_COPIED, TrueTime.now())
                     .putString(KEY_EVENTS_COPIED_LINE, EventLog.lines(this).lastOrNull()).apply()
@@ -775,6 +775,10 @@ class SettingsActivity : Activity() {
     }
 
     private fun reconPrefs() = getSharedPreferences("recon", MODE_PRIVATE)
+
+    /** The QR page's random path part: made once and kept in q5home's private storage, so the address is the same every time. */
+    private fun shareSecret(): String = reconPrefs().getString(KEY_SHARE_SECRET, null)
+        ?: LocalShare.randomSecret().also { reconPrefs().edit().putString(KEY_SHARE_SECRET, it).apply() }
 
     /** Whether the report prepared in the background is ready. */
     private fun reportStatus(): String {
@@ -1068,6 +1072,7 @@ class SettingsActivity : Activity() {
         /** When the owner last copied the recon report: the next report's event log starts there. */
         private const val KEY_EVENTS_COPIED = "events_copied_ms"
         private const val KEY_EVENTS_COPIED_LINE = "events_copied_line"
+        private const val KEY_SHARE_SECRET = "share_secret"
         const val SECTION_SIGNAL = "signal"
         private const val REQ_SIGNAL_PERMS = 10
         private const val REQ_CARPLAY = 1

@@ -12,7 +12,8 @@ import kotlin.concurrent.thread
 /**
  * Temporary web page on the head unit: opened on a phone by scanning a QR code; it shows the recon report to copy or download
  * (the owner just sends the copied text). Read-only: nothing is uploaded anywhere and no token is ever involved. Runs only while the "车机摸底" (recon) settings page is open and closes itself after [TIMEOUT_MS];
- * the path contains a random string so other devices on the same network can't guess it.
+ * the path contains a random string (made once per head unit and kept, so the address is always the same) so other devices on the
+ * same network can't guess it.
  *
  * [report] returns the report Markdown (null while it is still being generated); while [refreshing] is true the page reloads
  * itself every few seconds. [onCopied] runs when the owner copies or downloads it: the next report's event log then starts there.
@@ -22,12 +23,13 @@ class LocalShare(
     private val refreshing: () -> Boolean = { false },
     private val onCopied: () -> Unit = {},
     port: Int = DEFAULT_PORT,
+    /** The path's random part; the caller keeps one per head unit so the QR code / address stays the same every time. */
+    val secret: String = randomSecret(),
 ) {
     private val server: ServerSocket = runCatching { ServerSocket().apply { reuseAddress = true; bind(InetSocketAddress(port)) } }
         .getOrElse { ServerSocket(0) } // if the port is taken, pick any free one
     val port: Int get() = server.localPort
-    val secret: String = randomSecret()
-    private val startedAt = System.currentTimeMillis()
+    private val startedAt = android.os.SystemClock.elapsedRealtime()
 
     @Volatile var closed = false; private set
 
@@ -35,7 +37,7 @@ class LocalShare(
         thread(isDaemon = true, name = "q5-share") {
             while (!closed) {
                 val socket = runCatching { server.accept() }.getOrNull() ?: break
-                if (System.currentTimeMillis() - startedAt > TIMEOUT_MS) { socket.close(); close(); break }
+                if (android.os.SystemClock.elapsedRealtime() - startedAt > TIMEOUT_MS) { socket.close(); close(); break }
                 thread(isDaemon = true) { socket.use { handle(it) } }
             }
         }
@@ -115,7 +117,7 @@ class LocalShare(
         private const val HTML = "text/html; charset=utf-8"
         private const val TEXT = "text/plain; charset=utf-8"
 
-        private fun randomSecret(): String {
+        fun randomSecret(): String {
             val chars = "abcdefghijkmnpqrstuvwxyz23456789"
             val rnd = SecureRandom()
             return (1..8).map { chars[rnd.nextInt(chars.length)] }.joinToString("")

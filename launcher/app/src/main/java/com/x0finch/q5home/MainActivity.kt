@@ -291,7 +291,11 @@ class MainActivity : Activity() {
         val reading = if (config.homeGps) HomeGps.reading(gps.last, now) else null
         // Speed from the CAN bus (the instrument cluster's value, also in tunnels) when the car reports it, else GPS.
         val car = freshCar()
-        val canSpeed = car?.speed
+        // The car only reports its speed once it has moved since the head unit started: with the engine data there but no speed
+        // yet, the car is standing (0), unless GPS clearly sees it moving.
+        val canSpeed = car?.let { c ->
+            c.speed ?: if (c.rpm != null || c.fuel != null) reading?.speedKmh?.takeIf { it >= CarData.MOVING_KMH } ?: 0 else null
+        }
         val speedText = (canSpeed ?: reading?.speedKmh)?.toString()
         speedRow.visibility = if (speedText != null) View.VISIBLE else View.GONE
         if (speedText != null) speed.setText(speedText, animate = speed.text.isNotEmpty())

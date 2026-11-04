@@ -140,7 +140,7 @@ Add package names here as they are identified:
     Only start either yourself when the owner asks.
   - Head unit recon (no adb): the recon page has only the QR code, the event log (count, clear) and the usage-access status; nothing
     already known is shown there. `Recon.kt` (the read-only report), `LocalShare.kt` (temporary web page opened by scanning a QR code with
-    a phone: the one report, ready to copy and send; path contains a random string, closes after 15 minutes). **Reports are never uploaded and no GitHub token is used**: the owner copies
+    a phone: the one report, ready to copy and send; path contains a random string made once per head unit and kept in private storage, so the address and QR code stay the same; closes after 15 minutes). **Reports are never uploaded and no GitHub token is used**: the owner copies
     the text and sends it. `QrCode.kt` (hand-written QR code, tests check fixed hashes).
     `ApkStrings.kt` (reads string constants from vendor APKs), `DexScan.kt` (read-only disassembly: call order in methods that use
     matching strings, call / access matching methods or fields, or are named that way; call sites such as sendBroadcast /
@@ -163,6 +163,9 @@ Add package names here as they are identified:
     `TrueTime` corrects any time before 2025 by adding 1024 weeks (`HomeGps.ROLLOVER_MS`); use `TrueTime.now()` / `date()` /
     `calendar()` for anything shown or logged, never `System.currentTimeMillis()` directly. The event log after a copied report is
     found by the last line copied (`events_copied_line`), not by time, so a clock jump never drops events.
+    Intervals (event folding, log batching, page timeout) use `SystemClock.elapsedRealtime()`, never the wall clock. Driving card:
+    once the car reports engine / fuel data, a missing speed means it has not moved since start-up (shown as 0, GPS only if it
+    clearly sees movement); "waiting for GPS" is only for head units without car data.
     Code analysis covers only the vendor's own classes ("vendorClasses"), never bundled libraries.
     **There is exactly one report** (the owner's rule: no focused / full split) and it shows **only what is new**:
     `config/recon-known.json` lists what earlier reports already showed (system build, vendor app versions, disassembled methods,

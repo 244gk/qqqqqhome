@@ -59,7 +59,11 @@ class EventRecorderTest {
         // A line stamped with the rolled-back clock reads as the real time.
         EventLog.clear(app)
         EventLog.append(app, "广播", "rolled", rolled)
-        assertEquals(real, EventLog.timeOf(EventLog.lines(app).single()))
+        val line = EventLog.lines(app).single()
+        assertEquals(real, EventLog.timeOf(line))
+        // The report shows the corrected date, not 2007.
+        assertTrue(EventLog.corrected(line).startsWith("2026-"))
+        assertTrue(EventLog.corrected(line).endsWith("广播  rolled"))
         EventLog.clear(app)
     }
 

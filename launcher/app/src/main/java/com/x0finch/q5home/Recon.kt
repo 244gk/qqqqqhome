@@ -75,14 +75,14 @@ object Recon {
     /** The event log since [eventsSinceMs] (read when the report is shown: it is only a local file). */
     fun eventsSection(context: Context, known: ReconKnown, eventsSinceMs: Long?, afterLine: String? = null): String {
         val md = StringBuilder()
-        val all = EventLog.lines(context, eventsSinceMs, afterLine).sortedBy { EventLog.timeOf(it) ?: 0L }
+        val all = EventLog.lines(context, eventsSinceMs, afterLine).map(EventLog::corrected).sortedBy { EventLog.timeOf(it) ?: 0L }
         val noise = known.ignoreEvents.associateWith { 0 }.toMutableMap()
         val events = all.filter { line ->
             val g = known.ignoreEvents.firstOrNull { it.pattern.containsMatchIn(line) }
             if (g != null) noise[g] = noise.getValue(g) + 1
             g == null
         }
-        val since = eventsSinceMs?.let { SimpleDateFormat("MM-dd HH:mm:ss", Locale.US).format(Date(it)) }
+        val since = eventsSinceMs?.let { SimpleDateFormat("MM-dd HH:mm:ss", Locale.US).format(Date(TrueTime.correct(it))) }
         md.appendLine("## 后台事件记录（${if (since != null) "上次复制报告 $since 之后" else "全部"}，${events.size} 条）")
         md.appendLine("q5home 在后台只听不发，按时间排序。「启动」= q5home 进程重新启动，之前的空白是没在记录；「前台」= 切到前台的应用和页面。")
         noise.filterValues { it > 0 }.takeIf { it.isNotEmpty() }?.let { n ->

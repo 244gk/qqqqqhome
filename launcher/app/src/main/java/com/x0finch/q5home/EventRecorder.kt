@@ -36,6 +36,7 @@ import java.io.File
  */
 object EventRecorder {
     const val PROP_POLL_MS = 2_000L
+    private const val MAX_FOREGROUND_GAP_MS = 10 * 60_000L
     private const val REPEAT_WINDOW_MS = 1_000L
     /** Provider change notifications can stream (car_info: 5–20 a second): folded over a longer window. */
     private const val DATA_WINDOW_MS = 10_000L
@@ -142,7 +143,8 @@ object EventRecorder {
         if (!usageAllowed(app)) return
         val usm = app.getSystemService(android.app.usage.UsageStatsManager::class.java) ?: return
         val now = System.currentTimeMillis()
-        if (foregroundSince == 0L) foregroundSince = now - PROP_POLL_MS
+        // After a clock jump the window would span years and replay the whole usage history: start again from just now.
+        if (foregroundSince == 0L || now < foregroundSince || now - foregroundSince > MAX_FOREGROUND_GAP_MS) foregroundSince = now - PROP_POLL_MS
         val events = usm.queryEvents(foregroundSince, now) ?: return
         val e = android.app.usage.UsageEvents.Event()
         while (events.hasNextEvent()) {
@@ -354,7 +356,8 @@ object EventRecorder {
     /** Writes one line, folding repeats of the same [key] within a second and capping the rate. Runs on the recorder thread. */
     private fun log(app: Context, kind: String, text: String, key: String) {
         if (isIgnored(text)) return
-        val now = System.currentTimeMillis()
+        // Monotonic clock: a wall-clock jump (GPS week rollover, network time) must not fold or drop events.
+        val now = android.os.SystemClock.elapsedRealtime()
         val prev = last[key]
         val window = if (kind == "数据变化") DATA_WINDOW_MS else REPEAT_WINDOW_MS
         if (prev != null && now - prev.first < window) { last[key] = prev.first to prev.second + 1; return }

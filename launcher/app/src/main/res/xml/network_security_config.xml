@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Plain HTTP only for the empty "is there internet" page whose Date header gives the real time (TrueTime.syncFromNetwork):
+     HTTPS fails while the head unit's clock is wrong. Everything else stays HTTPS-only. -->
+<network-security-config>
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">connectivitycheck.gstatic.com</domain>
+    </domain-config>
+</network-security-config>

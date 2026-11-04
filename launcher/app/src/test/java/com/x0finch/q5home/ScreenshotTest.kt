@@ -66,7 +66,7 @@ class ScreenshotTest {
         override fun update(uri: android.net.Uri, v: android.content.ContentValues?, s: String?, a: Array<out String>?) = 0
     }
 
-    /** On the WWC2 platform: the OEM tile switches directly, the driving card shows CAN speed and rpm, the car card fuel and warnings. */
+    /** On the WWC2 platform: the OEM tile switches directly, the driving card shows the car's speed and rpm (no GPS fix), the car card fuel and warnings. */
     @Test
     fun homeOnWwc2() {
         RuntimeEnvironment.setQualifiers("w1280dp-h480dp-land-mdpi")
@@ -81,7 +81,7 @@ class ScreenshotTest {
             Thread.sleep(50)
         }
         org.junit.Assert.assertNotNull(findText(activity.window.decorView, "油量 57 L"))
-        org.junit.Assert.assertNotNull(findText(activity.window.decorView, "转速 2300"))
+        org.junit.Assert.assertNotNull(findText(activity.window.decorView, "车上报的车速  ·  转速 2300"))
         org.junit.Assert.assertNotNull(findText(activity.window.decorView, "后备箱开着"))
         org.junit.Assert.assertNotNull(findText(activity.window.decorView, "切到原车画面，点屏幕返回"))
         shoot(activity, "home-wwc2")

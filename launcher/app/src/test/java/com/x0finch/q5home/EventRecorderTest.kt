@@ -68,6 +68,27 @@ class EventRecorderTest {
     }
 
     @Test
+    fun realTimeSurvivesClockJumpsWithinABoot() {
+        val real = 1_793_700_000_000L // 2026-11-03
+        TrueTime.reset()
+        assertEquals(real, TrueTime.now(real, 1_000))               // plausible clock: anchored
+        assertEquals(real + 60_000, TrueTime.now(5_000_000L, 61_000)) // clock fell back to 1970: anchor + elapsed
+        assertEquals(real + 120_000, TrueTime.now(real - HomeGps.ROLLOVER_MS + 120_000, 121_000)) // GPS rollover
+        assertEquals(real + 180_500, TrueTime.now(real + 180_500, 181_000)) // agrees again: the clock is followed
+        // Someone sets the clock to another plausible date: followed, unless the real time came from a server.
+        val day = 86_400_000L
+        assertEquals(real + day, TrueTime.now(real + day, 241_000))
+        // No anchor (just booted, offline): one rollover is added back, but a 1970 clock is not turned into a made-up date.
+        TrueTime.reset()
+        assertEquals(real, TrueTime.now(real - HomeGps.ROLLOVER_MS, 0))
+        TrueTime.reset()
+        assertEquals(5_000_000L, TrueTime.now(5_000_000L, 0))
+        // Old 1970-stamped log lines are not "corrected" to 2028.
+        assertEquals(5_000_000L, TrueTime.correct(5_000_000L))
+        TrueTime.reset()
+    }
+
+    @Test
     fun eventsAfterTheCopiedLineSurviveAClockJump() {
         EventLog.clear(app)
         val t = 1_793_700_000_000L

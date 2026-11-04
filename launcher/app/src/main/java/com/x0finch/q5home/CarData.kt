@@ -125,10 +125,7 @@ class CarData(private val context: Context, private val onChange: (Status) -> Un
             }
         }
 
-        private fun air(s: Status): String? = when {
-            s.airAuto == true -> "空调自动"
-            (s.fanLevel ?: 0) > 0 -> "风量 ${s.fanLevel}"
-            else -> null
-        }
+        // air_info has no compressor (A/C on/off) field: MODE_AUTO stays true with only the fan running, so only the fan is shown.
+        private fun air(s: Status): String? = s.fanLevel?.takeIf { it > 0 }?.let { "风量 $it" }
     }
 }

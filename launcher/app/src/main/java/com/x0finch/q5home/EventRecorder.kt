@@ -37,6 +37,7 @@ import java.io.File
 object EventRecorder {
     const val PROP_POLL_MS = 2_000L
     private const val MAX_FOREGROUND_GAP_MS = 10 * 60_000L
+    private const val FOREGROUND_FRESH_MS = 60_000L
     private const val REPEAT_WINDOW_MS = 1_000L
     /** Provider change notifications can stream (car_info: 5–20 a second): folded over a longer window. */
     private const val DATA_WINDOW_MS = 10_000L
@@ -149,11 +150,12 @@ object EventRecorder {
         val e = android.app.usage.UsageEvents.Event()
         while (events.hasNextEvent()) {
             events.getNextEvent(e)
-            if (e.timeStamp < foregroundSince) continue
+            // Only what just happened: after a clock change the system can hand back old history with shifted time stamps.
+            if (e.timeStamp < foregroundSince || e.timeStamp < now - FOREGROUND_FRESH_MS || e.timeStamp > now + 5_000) continue
             @Suppress("DEPRECATION")
             if (e.eventType == android.app.usage.UsageEvents.Event.MOVE_TO_FOREGROUND) {
                 val text = "${e.packageName}/${e.className ?: "?"}"
-                EventLog.append(app, "前台", text, e.timeStamp)
+                EventLog.append(app, "前台", text, TrueTime.fromWall(e.timeStamp))
             }
         }
         foregroundSince = now

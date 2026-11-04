@@ -44,9 +44,13 @@ object ReconReport {
     private fun keyFile(context: Context) = File(dir(context), "report-static.key")
     private fun readyFile(context: Context) = File(dir(context), "report-ready.md")
     private fun propsFile(context: Context) = File(dir(context), "props.txt")
+    /** The real time the report was prepared (a file's own time stamp follows the possibly wrong system clock). */
+    private fun readyTimeFile(context: Context) = File(dir(context), "report-ready.time")
 
     /** When the whole report was last prepared (0 = never). */
-    fun readyAt(context: Context): Long = readyFile(context).takeIf { it.exists() }?.lastModified() ?: 0L
+    fun readyAt(context: Context): Long = readyFile(context).takeIf { it.exists() }?.let { f ->
+        runCatching { readyTimeFile(context).readText().trim().toLong() }.getOrNull() ?: TrueTime.correct(f.lastModified())
+    } ?: 0L
 
     /**
      * Prepares the report after [delayMs] (default: soon if nothing is prepared yet, otherwise after start-up has settled).
@@ -70,6 +74,7 @@ object ReconReport {
         state = State.WORKING
         progress = "下载分析配置"
         runCatching {
+            TrueTime.syncFromNetwork()
             val targets = ReconTargets.load(cache = ReconTargets.cacheFile(context))
             val known = ReconKnown.load(cache = ReconKnown.cacheFile(context))
             EventRecorder.reloadKnown(context)
@@ -88,6 +93,7 @@ object ReconReport {
             val tmp = File(dir(context), "report-ready.tmp")
             tmp.writeText(snapshot + static.readText())
             tmp.renameTo(readyFile(context))
+            readyTimeFile(context).writeText(TrueTime.now().toString())
         }.onSuccess { state = State.READY; progress = "" }
             .onFailure { state = State.FAILED; progress = "准备报告出错：${it.javaClass.simpleName} ${it.message?.take(80) ?: ""}" }
     }
@@ -120,8 +126,9 @@ object ReconReport {
         val md = StringBuilder()
         md.appendLine("<!-- q5home-recon v5 -->")
         md.appendLine("q5home $self，只读，没有改动车机。" + if (ready != null)
-            "报告在 ${time.format(Date(TrueTime.correct(ready.lastModified())))} 后台准备好，事件记录到 ${time.format(TrueTime.date())}。" else "")
-        if (TrueTime.systemClockRolledBack()) md.appendLine("**车机系统时钟早了 1024 周**（自动时间用了 GPS 报的日期），报告里的时间已按真实日期纠正。")
+            "报告在 ${time.format(Date(readyAt(context)))} 后台准备好，事件记录到 ${time.format(TrueTime.date())}。" else "")
+        if (TrueTime.systemClockWrong()) md.appendLine("**车机系统时钟不对**（现在显示 ${time.format(Date())}），" +
+            "报告里的时间是 q5home 按真实时间记的。")
         md.appendLine(if (known.source != null) "只列新内容：之前报告里已经有的（${known.source}）都省略了。"
             else "**已知列表没下载到，车机上也没有存过**，下面是全部内容，没有省略已知的。")
         md.appendLine()

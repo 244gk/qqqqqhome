@@ -289,27 +289,25 @@ class MainActivity : Activity() {
     private fun updateTrip() {
         val now = TrueTime.now()
         val reading = if (config.homeGps) HomeGps.reading(gps.last, now) else null
-        // Speed from the CAN bus (the instrument cluster's value, also in tunnels) when the car reports it, else GPS.
+        // GPS speed while there is a fresh fix; the car's own value (rarely reported by this CAN box) only without one, e.g. in a
+        // tunnel. Never a made-up 0: seen in the car, the CAN speed was missing while driving.
         val car = freshCar()
-        // The car only reports its speed once it has moved since the head unit started: with the engine data there but no speed
-        // yet, the car is standing (0), unless GPS clearly sees it moving.
-        val canSpeed = car?.let { c ->
-            c.speed ?: if (c.rpm != null || c.fuel != null) reading?.speedKmh?.takeIf { it >= CarData.MOVING_KMH } ?: 0 else null
-        }
-        val speedText = (canSpeed ?: reading?.speedKmh)?.toString()
+        val canSpeed = if (reading?.speedKmh != null) null else car?.speed
+        val speedText = (reading?.speedKmh ?: canSpeed)?.toString()
         speedRow.visibility = if (speedText != null) View.VISIBLE else View.GONE
         if (speedText != null) speed.setText(speedText, animate = speed.text.isNotEmpty())
         val rpm = car?.rpm
         rpmBar.visibility = if (rpm != null) View.VISIBLE else View.GONE
         rpm?.let { rpmBar.set(it) }
         val needPermission = canSpeed == null && reading == null && config.homeGps && !gps.hasPermission()
+        // The rpm is always named next to its bar, so the bar is never mistaken for a loading bar.
+        val rpmText = rpm?.let { "转速 $it" }
         val detail = when {
-            canSpeed != null -> listOfNotNull(rpm?.let { "转速 $it" }, reading?.detail?.ifEmpty { null })
-                .joinToString("  ·  ").ifEmpty { "车速来自车上的仪表数据" }
-            reading != null -> reading.detail.ifEmpty { "GPS 已定位" }
-            !config.homeGps -> "首页 GPS 已关闭"
+            reading != null -> listOfNotNull(reading.detail.ifEmpty { null }, rpmText).joinToString("  ·  ").ifEmpty { "GPS 已定位" }
+            canSpeed != null -> listOfNotNull("车上报的车速", rpmText).joinToString("  ·  ")
+            !config.homeGps -> listOfNotNull("首页 GPS 已关闭", rpmText).joinToString("  ·  ")
             needPermission -> "点一下开启定位"
-            else -> "正在等待 GPS 定位…"
+            else -> listOfNotNull("等 GPS 定位", rpmText).joinToString("  ·  ")
         }
         if (trip.text != detail) trip.text = detail
         trip.setTextColor(if (needPermission) Ui.ACCENT else Ui.TEXT_DIM)

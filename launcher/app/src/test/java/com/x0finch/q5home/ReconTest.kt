@@ -147,7 +147,7 @@ class ReconTest {
         val air = android.os.Bundle().apply { putBoolean("MODE_AUTO", true); putInt("LEFT_WIND_LEVEL", 6) }
         val s = CarData.parse(car, air)
         assertEquals(18, s.speed); assertEquals(1100, s.rpm); assertTrue(s.moving)
-        assertEquals(Triple("油量 57 L", "车门都关好 · 空调自动", CarData.Tone.NORMAL), CarData.texts(s))
+        assertEquals(Triple("油量 57 L", "车门都关好 · 风量 6", CarData.Tone.NORMAL), CarData.texts(s))
         car.putInt("DRIVER_SEAT_BELT", 0)
         assertEquals(Triple("油量 57 L", "安全带没系", CarData.Tone.DANGER), CarData.texts(CarData.parse(car, air)))
         car.putInt("HANDBRAKE_STATE", 1)

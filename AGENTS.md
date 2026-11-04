@@ -160,12 +160,19 @@ Add package names here as they are identified:
     vehicle data (read-only `call("xxx_info")` getters), properties, settings and provider reads into one file. **Scanning the QR code
     computes nothing** (the owner's rule): it serves that file plus the event log at once.
     Head-unit clock: with automatic time on, the unit takes the GPS date and can land exactly 1024 weeks in the past (seen: 2007).
-    `TrueTime` corrects any time before 2025 by adding 1024 weeks (`HomeGps.ROLLOVER_MS`); use `TrueTime.now()` / `date()` /
-    `calendar()` for anything shown or logged, never `System.currentTimeMillis()` directly. The event log after a copied report is
+    It has also fallen back to 1970. `TrueTime` keeps an anchor (real time + boot clock, per boot in private prefs) while the clock
+    is plausible and refreshes it from the `Date` header of a plain-HTTP connectivity page (`syncFromNetwork`, run with each report
+    preparation; cleartext is allowed only for that host in `res/xml/network_security_config.xml`, HTTPS fails with a wrong clock);
+    within a boot, clock jumps change nothing. Without an anchor it adds back one 1024-week rollover only when that gives a plausible
+    date (a 1970 clock is never turned into 2028). Use `TrueTime.now()` / `date()` / `calendar()` for anything shown or logged, and
+    `fromWall()` for system time stamps; never `System.currentTimeMillis()` directly. Foreground-app events are only taken when
+    their time stamp is within the last minute (after a clock change the system replays old history with shifted stamps). The event log after a copied report is
     found by the last line copied (`events_copied_line`), not by time, so a clock jump never drops events.
     Intervals (event folding, log batching, page timeout) use `SystemClock.elapsedRealtime()`, never the wall clock. Driving card:
-    once the car reports engine / fuel data, a missing speed means it has not moved since start-up (shown as 0, GPS only if it
-    clearly sees movement); "waiting for GPS" is only for head units without car data.
+    GPS speed while there is a fresh fix, the car's speed (rarely reported by this CAN box, missing while driving) only without
+    one; never a made-up 0. The rpm is always named next to its bar. Car card: no A/C state (air_info has no compressor field,
+    MODE_AUTO stays true with only the fan), only the fan level. "handbrake" in the vendor broadcasts / HANDBRAKE_STATE only
+    flipped when leaving and returning to P in the owner's test (a guess, not confirmed); no gear, reverse or radar data arrives.
     Code analysis covers only the vendor's own classes ("vendorClasses"), never bundled libraries.
     **There is exactly one report** (the owner's rule: no focused / full split) and it shows **only what is new**:
     `config/recon-known.json` lists what earlier reports already showed (system build, vendor app versions, disassembled methods,
